@@ -203,6 +203,46 @@ public class ComponentTests : BunitContext
     }
 
     [Fact]
+    public async Task ReportModal_DownloadsWordAndMarkdownForBothFlowsAndTabs()
+    {
+        foreach (var flow in new[] { BackupFlowKind.RecoveryServices, BackupFlowKind.BackupVault })
+        {
+            await ScanAsync(flow);
+            var cut = Render<ReportModal>(p => p.Add(x => x.Flow, flow));
+            await cut.InvokeAsync(() => cut.Instance.Open(false));
+            foreach (var findings in new[] { false, true })
+            {
+                if (findings) cut.FindAll(".report-tabs button")[1].Click();
+                var buttons = cut.FindAll(".report-downloads button");
+                Assert.Equal(2, buttons.Count);
+                Assert.Contains("Download .docx", buttons[0].TextContent);
+                Assert.Contains("Download .md", buttons[1].TextContent);
+                foreach (var markdown in new[] { false, true })
+                {
+                    await buttons[markdown ? 1 : 0].ClickAsync(new());
+                    var call = JSInterop.Invocations.Last(i => i.Identifier == "rmab.download");
+                    var ctx = Flows.ReportContext(flow);
+                    Assert.Equal(BackupReportService.FileName(ctx, findings, markdown), call.Arguments[0]);
+                    var bytes = Convert.FromBase64String(Assert.IsType<string>(call.Arguments[1]));
+                    if (markdown)
+                    {
+                        Assert.Equal("text/markdown;charset=utf-8", call.Arguments[2]);
+                        Assert.Equal(findings ? BackupReportService.FindingsMarkdown(ctx) : BackupReportService.SummaryMarkdown(ctx),
+                            System.Text.Encoding.UTF8.GetString(bytes));
+                    }
+                    else
+                    {
+                        Assert.Equal("application/vnd.openxmlformats-officedocument.wordprocessingml.document", call.Arguments[2]);
+                        Assert.Equal((byte)'P', bytes[0]);
+                        Assert.Equal((byte)'K', bytes[1]);
+                    }
+                    Assert.All(cut.FindAll(".report-downloads button"), button => Assert.False(button.HasAttribute("disabled")));
+                }
+            }
+        }
+    }
+
+    [Fact]
     public async Task BackupFlow_FallsBackToScopeWhenThereIsNoScan()
     {
         var cut = Render<BackupFlow>(p => p.Add(x => x.Flow, BackupFlowKind.RecoveryServices).Add(x => x.Step, "grades"));

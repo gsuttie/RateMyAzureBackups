@@ -23,13 +23,15 @@ public static class BackupReportService
     public static byte[] FindingsDocx(BackupReportContext ctx) => DocxReportRenderer.Render(BuildFindings(ctx));
     public static string SummaryHtml(BackupReportContext ctx) => HtmlReportRenderer.Render(BuildSummary(ctx));
     public static string FindingsHtml(BackupReportContext ctx) => HtmlReportRenderer.Render(BuildFindings(ctx));
+    public static string SummaryMarkdown(BackupReportContext ctx) => MarkdownReportRenderer.Render(BuildSummary(ctx));
+    public static string FindingsMarkdown(BackupReportContext ctx) => MarkdownReportRenderer.Render(BuildFindings(ctx));
 
-    public static string FileName(BackupReportContext ctx, bool findings)
+    public static string FileName(BackupReportContext ctx, bool findings, bool markdown = false)
     {
         var scope = ctx.Flow == BackupFlowKind.RecoveryServices ? "RecoveryServices" : "BackupVault";
         var customer = string.Concat((ctx.CustomerName ?? "").Where(c => char.IsLetterOrDigit(c) || c is '-' or '_'));
         if (string.IsNullOrEmpty(customer)) customer = "Backup";
-        return $"{customer}-{scope}-Backup-{(findings ? "Findings" : "Summary")}-{ctx.ScanDate:yyyyMMdd}.docx";
+        return $"{customer}-{scope}-Backup-{(findings ? "Findings" : "Summary")}-{ctx.ScanDate:yyyyMMdd}.{(markdown ? "md" : "docx")}";
     }
 
     // ── Summary report ───────────────────────────────────────────────────────

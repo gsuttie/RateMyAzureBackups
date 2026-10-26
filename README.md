@@ -15,7 +15,9 @@ It is the sibling of [RateMyWAF](https://github.com/gsuttie/ratemywaf): same lay
 
 ## Assessment coverage
 
-Both flows include an assessment panel and export the following in **both Word reports and their HTML previews**:
+Both flows include an assessment panel and export the following in **both report versions, as Word, Markdown or an HTML preview**:
+
+The report window offers **Download .docx** and **Download .md** for both Summary and Detailed findings. Markdown uses GitHub-flavored headings, tables and lists; open the UTF-8 `.md` file and paste its contents into a GitHub issue.
 
 Both report versions also include full vault security and diagnostics (including workspace IDs), complete policy settings and matched item IDs, protected-item source/policy mappings and errors, rating evidence, finding remediation, and all available job-analysis details. Reports are not restricted by on-screen inventory filters or pagination.
 

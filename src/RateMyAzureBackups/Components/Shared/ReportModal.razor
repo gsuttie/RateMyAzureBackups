@@ -10,11 +10,15 @@
         <div class="report-preview">@((MarkupString)_html)</div>
     </ChildContent>
     <Footer>
-        <span class="muted small">Word document, generated from the same content as this preview.</span>
-        <button class="btn btn-primary" @onclick="DownloadAsync" disabled="@_downloading">
-            @if (_downloading) { <span class="spinner sm light"></span> } else { <Icon Name="doc" Size="16" /> }
-            Download .docx
-        </button>
+        <span class="muted small">Word or GitHub-ready Markdown, generated from the same content as this preview.</span>
+        <div class="report-downloads">
+            <button class="btn btn-primary" @onclick="() => DownloadAsync(false)" disabled="@_downloading">
+                <Icon Name="doc" Size="16" /> Download .docx
+            </button>
+            <button class="btn btn-ghost" @onclick="() => DownloadAsync(true)" disabled="@_downloading">
+                <Icon Name="doc" Size="16" /> Download .md
+            </button>
+        </div>
     </Footer>
 </Modal>
 
@@ -44,15 +48,17 @@
 
     private void Close() => _visible = false;
 
-    private async Task DownloadAsync()
+    private async Task DownloadAsync(bool markdown)
     {
         _downloading = true;
         try
         {
             var ctx = Flows.ReportContext(Flow);
-            var bytes = _findings ? BackupReportService.FindingsDocx(ctx) : BackupReportService.SummaryDocx(ctx);
-            await JS.InvokeVoidAsync("rmab.download", BackupReportService.FileName(ctx, _findings), Convert.ToBase64String(bytes),
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+            var bytes = markdown
+                ? System.Text.Encoding.UTF8.GetBytes(_findings ? BackupReportService.FindingsMarkdown(ctx) : BackupReportService.SummaryMarkdown(ctx))
+                : _findings ? BackupReportService.FindingsDocx(ctx) : BackupReportService.SummaryDocx(ctx);
+            await JS.InvokeVoidAsync("rmab.download", BackupReportService.FileName(ctx, _findings, markdown), Convert.ToBase64String(bytes),
+                markdown ? "text/markdown;charset=utf-8" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
         }
         finally
         {

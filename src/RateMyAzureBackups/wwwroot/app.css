@@ -367,7 +367,8 @@ button.class-pill:hover { filter: brightness(1.15); }
 .modal.wide { width: min(980px, 100%); }
 .modal-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .9rem 1.2rem; border-bottom: 1px solid var(--border); }
 .modal-body { padding: 1rem 1.2rem; overflow: auto; }
-.modal-foot { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .8rem 1.2rem; border-top: 1px solid var(--border); }
+.modal-foot { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; padding: .8rem 1.2rem; border-top: 1px solid var(--border); }
+.report-downloads { display: flex; gap: .5rem; flex-wrap: wrap; }
 .report-tabs { display: flex; gap: .25rem; margin-bottom: .8rem; }
 .tab { border: 1px solid var(--border); background: var(--surface); padding: .4rem .9rem; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: .88rem; }
 .tab.active { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
