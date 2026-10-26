@@ -8,7 +8,8 @@ public static class BackupAssessmentService
     public const string SupportMatrixUrl = "https://learn.microsoft.com/en-us/azure/backup/backup-support-matrix";
     public const string CostScope = "Actual pre-tax charges in the Backup meter category, across both vault products in the selected subscriptions. " +
         "Not a per-item allocation or full recovery cost: snapshots, storage transactions, native database backups, network, restore and third-party charges may be billed elsewhere. " +
-        "Billing data can be delayed; unavailable is not zero. Totals are separated by currency and must not be added across flows.";
+        "Billing data can be delayed; successful queries may be reused for up to four hours to reduce Azure throttling. " +
+        "Unavailable is not zero. Totals are separated by currency and must not be added across flows.";
     public const string InventoryScope = "Inventory includes resources visible in Azure Resource Graph and discovered backup sources. " +
         "Vault associations cover only this flow and the selected subscriptions. A backup item may cover only part of a resource (for example one share or guest database). " +
         "No vault protection found is a review candidate, not proof of no backup: native, cross-scope and third-party protection is not assessed. " +

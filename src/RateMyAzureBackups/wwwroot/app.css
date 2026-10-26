@@ -179,6 +179,8 @@ button { font: inherit; color: inherit; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn-primary:hover { background: var(--accent-2); border-color: var(--accent-2); }
+.btn-success { background: #2E7D32; border-color: #2E7D32; color: #fff; }
+.btn-success:hover { background: #256529; border-color: #256529; }
 .btn-ghost { background: transparent; }
 .btn-sm { padding: .35rem .7rem; font-size: .84rem; border-radius: 8px; }
 .btn-lg { padding: .75rem 1.3rem; font-size: 1rem; border-radius: 12px; }

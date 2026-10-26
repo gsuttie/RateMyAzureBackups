@@ -111,7 +111,10 @@ public sealed partial class BackupDiscoveryService
             {
                 _logger.LogWarning(ex, "Could not read backup costs for {SubscriptionId}.", sub);
                 coverage.Error = ex.Message;
-                result.Warnings.Add($"Backup costs unavailable for {sub}: {ex.Message}. Check Cost Management Reader access and billing availability.");
+                var guidance = ex is HttpRequestException { StatusCode: System.Net.HttpStatusCode.TooManyRequests }
+                    ? "Azure throttled the billing query; wait before rescanning. Other backup assessment data is unaffected."
+                    : "Check Cost Management Reader access and billing availability.";
+                result.Warnings.Add($"Backup costs unavailable for {sub}: {ex.Message}. {guidance}");
             }
         }
     }

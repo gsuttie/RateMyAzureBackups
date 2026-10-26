@@ -36,6 +36,8 @@ Both report versions also include full vault security and diagnostics (including
 
 **Cost limits:** costs are subscription-wide across both vault products, not a per-flow or per-item allocation; do not add the same subscription's totals across flows. Snapshot, storage, network, restore, native-service and third-party charges can be billed outside the Backup meter category. Billing delays, permissions and unavailable data are shown explicitly, never replaced with zero. Sample mode uses labelled illustrative charges.
 
+Billing queries are serialized and paced at least one second apart per app instance. Identical successful requests (tenant, subscription/query URL and request body, including date range and pagination) are cached in memory for up to four hours across both flows. HTTP 429 responses respect the longest Azure Cost Management or standard `Retry-After` header, with exponential backoff and jitter when no valid delay is supplied. At most four attempts and two minutes of scheduled waiting are allowed per request; longer cooldowns are retained without blocking the rest of the assessment. Errors are not cached as cost data, and throttling is distinguished from billing permission failures.
+
 ## Scoring model
 
 100 points across six weighted categories, mapped to a letter, with hard caps. The model is the same for both vault products.

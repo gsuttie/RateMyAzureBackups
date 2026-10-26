@@ -217,6 +217,8 @@ public class ComponentTests : BunitContext
                 Assert.Equal(2, buttons.Count);
                 Assert.Contains("Download .docx", buttons[0].TextContent);
                 Assert.Contains("Download .md", buttons[1].TextContent);
+                Assert.Contains("btn-primary", buttons[0].ClassList);
+                Assert.Contains("btn-success", buttons[1].ClassList);
                 foreach (var markdown in new[] { false, true })
                 {
                     await buttons[markdown ? 1 : 0].ClickAsync(new());
