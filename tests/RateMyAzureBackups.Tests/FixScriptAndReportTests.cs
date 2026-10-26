@@ -178,6 +178,103 @@ public class ReportTests
     }
 
     [Fact]
+    public void BothReportVersions_IncludeFullDetailsInPreviewAndDownload()
+    {
+        var ctx = Context(BackupFlowKind.RecoveryServices, withJobs: true);
+        var scan = ctx.Scan!;
+        var vault = scan.Vaults.First(v => v.Items.Count > 0);
+        vault.PublicNetworkAccess = "report-network-setting";
+        vault.SoftDeleteRetentionDays = 47;
+        vault.LogDestinations = ["report-diagnostic-destination"];
+        vault.LogWorkspaceIds = ["/workspaces/report-workspace"];
+        var item = vault.Items[0];
+        item.HealthStatus = "report-item-health";
+        item.ErrorMessage = "report-item-error-message";
+        item.SourceResourceId = "/sources/report-source";
+        item.LastBackupTime = new DateTimeOffset(2026, 10, 26, 12, 34, 56, TimeSpan.FromHours(2));
+        var policy = scan.Policies.First();
+        policy.PolicyType = "report-policy-type";
+        policy.TimeZone = "report-time-zone";
+        policy.InstantRpRetentionDays = 13;
+        policy.LogBackupFrequencyMinutes = 17;
+        policy.LogRetentionDays = 19;
+        item.PolicyId = policy.Id;
+        scan.Findings.Last().Fix = "report-last-finding-remediation";
+        scan.Ratings.First().Categories.First().Details.Add("report-category-evidence");
+        var activity = ctx.JobAnalysis!.Activities.First();
+        activity.ErrorCode = "report-job-error-code";
+        activity.AzureRecommendation = "report-azure-recommendation";
+        activity.SampleJobIds = ["/jobs/report-sample-job"];
+        activity.AverageDuration = TimeSpan.FromMinutes(23);
+        ctx.JobAnalysis.HealthyItems = ["report-healthy-item"];
+        ctx.JobAnalysis.Warnings.Add("report-job-warning");
+        scan.Warnings.Add("report-scan-warning");
+        for (var n = 1; n <= 31; n++)
+            scan.ResourceInventory.Add(new()
+            {
+                Id = $"/inventory/report-resource-{n}", Name = $"report-resource-{n}",
+                Environment = "Critical", ResourceType = "microsoft.compute/virtualmachines",
+                BackupItemIds = [item.Id],
+                Recovery = new()
+                {
+                    Owner = $"report-owner-{n}", RpoHours = 3, RtoHours = 6, RetentionDays = 45,
+                    RestoreTestEvidence = $"report-restore-evidence-{n}", Notes = $"report-recovery-notes-{n}"
+                }
+            });
+        scan.Costs.Add(new()
+        {
+            ResourceId = "/billing/report-billed-resource", Meter = "report-meter", Currency = "EUR", Amount = 123.45m
+        });
+        var contents = new List<string>
+        {
+            BackupReportService.SummaryHtml(ctx),
+            BackupReportService.FindingsHtml(ctx)
+        };
+        foreach (var bytes in new[] { BackupReportService.SummaryDocx(ctx), BackupReportService.FindingsDocx(ctx) })
+        {
+            using var zip = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read);
+            using var reader = new StreamReader(zip.GetEntry("word/document.xml")!.Open());
+            contents.Add(reader.ReadToEnd());
+        }
+        foreach (var content in contents)
+        {
+            foreach (var expected in new[]
+            {
+                "report-network-setting", "47 days", "report-diagnostic-destination", "/workspaces/report-workspace",
+                "report-item-health", "report-item-error-message", "/sources/report-source", item.Id, policy.Id,
+                "2026-10-26 10:34:56 UTC", "report-policy-type", "report-time-zone", "13 days", "17 minutes", "19 days",
+                "report-last-finding-remediation", "report-category-evidence", "report-job-error-code",
+                "report-azure-recommendation", "/jobs/report-sample-job", "00:23:00", "report-healthy-item",
+                "report-job-warning", "report-scan-warning", "/inventory/report-resource-31",
+                "report-owner-31", "report-restore-evidence-31", "report-recovery-notes-31",
+                "/billing/report-billed-resource", "report-meter", "EUR", "Required retention",
+                "Cost optimisation opportunities", "Recovery and assessment limitations"
+            })
+                Assert.Contains(expected, content, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public void BothReports_KeepUnreadSettingsAndFailedJobQueriesExplicit()
+    {
+        var ctx = Context(BackupFlowKind.BackupVault, withJobs: true);
+        ctx.Scan!.Vaults[0].ImmutabilityState = "";
+        ctx.Scan.Vaults[0].DiagnosticsEnabled = null;
+        ctx.JobAnalysis!.JobsQueryable = false;
+        ctx.JobAnalysis.QueryError = "report-job-query-denied";
+        ctx.JobAnalysis.Warnings.Add("report-query-warning");
+        foreach (var html in new[] { BackupReportService.SummaryHtml(ctx), BackupReportService.FindingsHtml(ctx) })
+        {
+            Assert.Contains("report-job-query-denied", html);
+            Assert.Contains("report-query-warning", html);
+            Assert.Contains("Unknown", html);
+            Assert.Contains("full vault configuration", html);
+            Assert.Contains("Instant restore snapshots", html);
+            Assert.Contains("Source resource ID", html);
+        }
+    }
+
+    [Fact]
     public void FileName_IsSafeAndDescriptive()
     {
         var ctx = Context(BackupFlowKind.RecoveryServices, withJobs: false);

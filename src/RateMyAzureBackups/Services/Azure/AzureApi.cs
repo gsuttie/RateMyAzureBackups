@@ -124,6 +124,7 @@ public sealed class AzureApi : IAzureApi
             _tokenCache[key] = token;
             return token.Token;
         }
+
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "Token acquisition failed for tenant {TenantId}.", tenantId);
@@ -134,6 +135,26 @@ public sealed class AzureApi : IAzureApi
         {
             _tokenLock.Release();
         }
+    }
+
+    public async Task<JsonElement> PostArmQueryAsync(string url, object body, string? tenantId, CancellationToken ct = default)
+    {
+        var uri = new Uri(url);
+        if (uri.Scheme != Uri.UriSchemeHttps || !uri.Host.Equals("management.azure.com", StringComparison.OrdinalIgnoreCase)
+            || uri.Port != 443 || !string.IsNullOrEmpty(uri.UserInfo))
+            throw new InvalidOperationException("ARM query URL must use the Azure management endpoint.");
+
+        var client = _httpClientFactory.CreateClient();
+        var token = await GetTokenAsync(tenantId, ArmScopes, ct);
+        using var request = new HttpRequestMessage(HttpMethod.Post, uri);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        request.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+        using var response = await client.SendAsync(request, ct);
+        var json = await response.Content.ReadAsStringAsync(ct);
+        if (!response.IsSuccessStatusCode)
+            throw new InvalidOperationException($"ARM query failed ({(int)response.StatusCode}): {Truncate(json, 300)}");
+        using var doc = JsonDocument.Parse(json);
+        return doc.RootElement.Clone();
     }
 
     private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max] + "…";

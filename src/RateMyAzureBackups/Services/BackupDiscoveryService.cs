@@ -12,7 +12,7 @@ namespace RateMyAzureBackups.Services;
 /// redundancy settings, diagnostic settings and unprotected workloads, produces findings and rates every
 /// vault A-F. Strictly read-only: nothing here ever modifies an Azure resource.
 /// </summary>
-public sealed class BackupDiscoveryService
+public sealed partial class BackupDiscoveryService
 {
     internal const string TypeRsv = "microsoft.recoveryservices/vaults";
     internal const string TypeBackupVault = "microsoft.dataprotection/backupvaults";
@@ -127,6 +127,10 @@ public sealed class BackupDiscoveryService
         progress?.Report("Reading diagnostic settings…");
         await ApplyDiagnosticsAsync(result, tenantId, ct);
 
+        progress?.Report("Inventorying resources and reading backup costs…");
+        await ApplyResourceInventoryAsync(result, subscriptionIds, tenantId, ct);
+        await ApplyCostsAsync(result, subscriptionIds, tenantId, ct);
+
         progress?.Report("Rating…");
         Finalize(result);
         return result;
@@ -211,6 +215,8 @@ public sealed class BackupDiscoveryService
         var vaultStore = Arr(props, "storageSettings").FirstOrDefault(s => Str(s, "datastoreType").Equals("VaultStore", StringComparison.OrdinalIgnoreCase));
         if (vaultStore.ValueKind != JsonValueKind.Object) vaultStore = Arr(props, "storageSettings").FirstOrDefault();
         info.StorageRedundancy = Str(vaultStore, "type");
+        info.StorageConfigurations = Arr(props, "storageSettings")
+            .Select(s => $"{Str(s, "datastoreType")}: {Str(s, "type")}").ToList();
 
         var features = Obj(props, "featureSettings");
         info.CrossRegionRestore = EnabledFlag(Str(Obj(features, "crossRegionRestoreSettings"), "state"));

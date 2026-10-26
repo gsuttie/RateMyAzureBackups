@@ -185,6 +185,7 @@ else
                             <div>
                                 <h4>Vault configuration</h4>
                                 <dl class="kv">
+                                    <dt>Backup region</dt><dd>@vault.Location</dd>
                                     <dt>Redundancy</dt><dd>@vault.RedundancyLabel @(vault.CrossRegionRestore == true ? "· Cross Region Restore on" : vault.CrossRegionRestore == false ? "· no Cross Region Restore" : "")</dd>
                                     <dt>Soft delete</dt><dd>@(string.IsNullOrEmpty(vault.SoftDeleteState) ? "unknown" : vault.SoftDeleteState)@(vault.SoftDeleteRetentionDays is { } sd ? $" ({sd} days)" : "")</dd>
                                     <dt>Immutability</dt><dd>@(string.IsNullOrEmpty(vault.ImmutabilityState) ? "Disabled" : vault.ImmutabilityState)</dd>
@@ -264,7 +265,7 @@ else
     </div>
     @if (Scan.Findings.Count == 0)
     {
-        <p class="ok"><Icon Name="check" Size="16" /> No issues found — every item is protected and fresh, every vault is redundant, soft-deleted and immutable.</p>
+        <p class="ok"><Icon Name="check" Size="16" /> No findings from the checks performed. Review unknown settings, inventory coverage and recovery requirements before concluding that protection is sufficient.</p>
     }
     else
     {
@@ -334,6 +335,8 @@ else
         </div>
     }
 </section>
+
+<AssessmentPanel Scan="Scan" />
 
 <div class="actions end">
     @if (HasJobTargets)

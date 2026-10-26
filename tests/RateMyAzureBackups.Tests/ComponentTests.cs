@@ -19,6 +19,7 @@ public class ComponentTests : BunitContext
         public Task<List<JsonElement>> QueryResourceGraphAsync(string query, IReadOnlyCollection<string> subscriptionIds, string? tenantId, CancellationToken ct = default) => throw new InvalidOperationException("Azure must not be called in demo mode");
         public Task<List<JsonElement>> GetArmListAsync(string url, string? tenantId, CancellationToken ct = default) => throw new InvalidOperationException("Azure must not be called in demo mode");
         public Task<JsonElement> GetArmAsync(string url, string? tenantId, CancellationToken ct = default) => throw new InvalidOperationException("Azure must not be called in demo mode");
+        public Task<JsonElement> PostArmQueryAsync(string url, object body, string? tenantId, CancellationToken ct = default) => throw new InvalidOperationException("Azure must not be called in demo mode");
     }
 
     private BackupFlowService Flows { get; }
@@ -45,6 +46,61 @@ public class ComponentTests : BunitContext
         fs.SelectedSubscriptionIds.Add(DemoDataService.SubProd);
         fs.SelectedSubscriptionIds.Add(DemoDataService.SubShared);
         await Flows.ScanAsync(flow);
+    }
+
+    [Fact]
+    public void AssessmentPanel_SavesValidatedRequirementsAndIncludesBillingAndLimitations()
+    {
+        var resource = new ResourceInventoryInfo { Id = "/vm", Name = "vm", ResourceType = "microsoft.compute/virtualmachines" };
+        var scan = new BackupScanResult { SubscriptionIds = ["s"], ResourceInventory = [resource] };
+        var cut = Render<AssessmentPanel>(p => p.Add(x => x.Scan, scan));
+        Assert.Contains("Current backup costs", cut.Markup);
+        Assert.Contains("Billing data not collected", cut.Markup);
+        Assert.Contains("RPO is the maximum acceptable data loss", cut.Markup);
+        Assert.Contains("RPO not documented", cut.Markup);
+        cut.Find("button").Click();
+        cut.Find("#recovery-environment").Change("Production");
+        cut.Find("#recovery-owner").Change("Service team");
+        cut.Find("#recovery-rpo").Change("4");
+        cut.Find("#recovery-rto").Change("-1");
+        cut.Find("#recovery-retention").Change("30");
+        cut.Find("#recovery-evidence").Change("Ticket 123: restored in 2h");
+        cut.Find("#recovery-notes").Change("Keys and DNS required");
+        cut.Find("form").Submit();
+        Assert.Null(resource.Recovery.RpoHours); // Invalid form must not mutate the stored requirements.
+        Assert.NotEmpty(cut.FindAll(".validation-errors li"));
+        cut.Find("#recovery-rto").Change("8");
+        cut.Find("form").Submit();
+        Assert.Empty(cut.FindAll("form"));
+        Assert.Equal("Production", resource.Environment);
+        Assert.Equal(4, resource.Recovery.RpoHours);
+        Assert.Equal(8, resource.Recovery.RtoHours);
+        Assert.Equal(30, resource.Recovery.RetentionDays);
+        Assert.Equal("Service team", resource.Recovery.Owner);
+        Assert.Equal("Ticket 123: restored in 2h", resource.Recovery.RestoreTestEvidence);
+        Assert.Equal("Keys and DNS required", resource.Recovery.Notes);
+        Assert.Contains("Requirements saved", cut.Find("[role=status]").TextContent);
+        Assert.DoesNotContain("RPO not documented", cut.Markup);
+    }
+
+    [Fact]
+    public void AssessmentPanel_FiltersAndPagesWithoutDroppingInventoryEntries()
+    {
+        var scan = new BackupScanResult
+        {
+            ResourceInventory = Enumerable.Range(1, 30).Select(n => new ResourceInventoryInfo { Id = $"/vm{n:00}", Name = $"vm{n:00}" }).ToList()
+        };
+        var cut = Render<AssessmentPanel>(p => p.Add(x => x.Scan, scan));
+        Assert.Equal(25, cut.FindAll(".assessment tbody tr").Count);
+        cut.FindAll(".assessment .actions button")[1].Click();
+        Assert.Equal(5, cut.FindAll(".assessment tbody tr").Count);
+        cut.Find("#inventory-search").Input("vm01");
+        Assert.Single(cut.FindAll(".assessment tbody tr"));
+        Assert.Contains("vm01", cut.Find(".assessment tbody").TextContent);
+        Assert.Contains("Page 1 of 1", cut.Markup);
+        cut.Find("#inventory-search").Input("does-not-exist");
+        Assert.Contains("No inventory entries match", cut.Markup);
+        Assert.Equal(30, scan.ResourceInventory.Count);
     }
 
     [Fact]
