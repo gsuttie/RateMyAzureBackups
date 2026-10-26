@@ -1,0 +1,258 @@
+@inject BackupFlowService Flows
+@inject IJSRuntime JS
+
+@if (Scan is null)
+{
+    <div class="card empty"><p>No scan yet. <a href="/@Flow.Route()">Choose a scope</a> first.</p></div>
+    return;
+}
+
+<div class="card">
+    <div class="card-head">
+        <h2 class="card-title">3 · Analyse the backup jobs</h2>
+        <span class="muted small">Job history comes from Azure Resource Graph (roughly the last month). Report only.</span>
+    </div>
+    <p class="muted small">
+        Pick a @Flow.Label(). You get what changed against the previous period, which items fail persistently versus once,
+        the error behind each failure and concrete recommendations with a PowerShell script to act on them.
+    </p>
+
+    <div class="picker">
+        <label class="field grow">
+            <span class="field-label">@Flow.Label()</span>
+            <select class="select" value="@_targetId" @onchange="OnTargetChanged" disabled="@_running">
+                @foreach (var t in Targets)
+                {
+                    <option value="@t.Id">@t.Name (@t.Items @(t.Items == 1 ? Flow.ItemLabel() : Flow.ItemPluralLabel()))</option>
+                }
+            </select>
+        </label>
+        <label class="field">
+            <span class="field-label">Time range</span>
+            <select class="select" @bind="_timeRange" disabled="@_running">
+                @foreach (var (key, label) in BackupJobAnalysisService.TimeRanges)
+                {
+                    <option value="@key">@label</option>
+                }
+            </select>
+        </label>
+        <button class="btn btn-primary" @onclick="RunAsync" disabled="@_running">
+            @if (_running) { <span class="spinner sm light"></span> <span>Analysing…</span> }
+            else { <Icon Name="jobs" Size="16" /> <span>Analyse jobs</span> }
+        </button>
+    </div>
+
+    @{ var vault = Scan.Vaults.FirstOrDefault(v => v.Id.Equals(_targetId, StringComparison.OrdinalIgnoreCase)); }
+    @if (vault is { AlertsForAllJobFailures: false })
+    {
+        <div class="notice notice-warn"><Icon Name="warn" Size="16" /><span class="small">Built-in job-failure alerts are <b>disabled</b> on this vault — failures found here were not raised anywhere.</span></div>
+    }
+    @if (vault is not null && vault.Items.Any(i => !i.IsActive))
+    {
+        <div class="notice notice-info"><Icon Name="info" Size="16" /><span class="small">@vault.Items.Count(i => !i.IsActive) @(Flow.ItemLabel() + "(s)") have protection stopped or in error; they may show no jobs at all in this window.</span></div>
+    }
+</div>
+
+@if (Result is { JobsQueryable: false })
+{
+    <div class="notice notice-error"><Icon Name="warn" Size="18" /><div><b>Jobs could not be queried.</b><div class="small">@Result.QueryError</div></div></div>
+}
+else if (Result is not null)
+{
+    <div class="results-bar">
+        <span class="muted small"><b>@Result.TargetName</b> · @Result.TimeRangeLabel · @Result.SuccessRate% of finished jobs succeeded @if (Flows.State.DemoMode) { <span class="pill pill-demo sm">sample</span> }</span>
+        <span class="results-actions">
+            <button class="btn btn-ghost btn-sm" @onclick="() => _changesOpen = true"><Icon Name="refresh" Size="14" /> Changes vs previous period <span class="count">@Result.Changes.Count</span></button>
+            <button class="btn btn-ghost btn-sm" @onclick="() => _report.Open(false)"><Icon Name="doc" Size="14" /> Summary report</button>
+            <button class="btn btn-ghost btn-sm" @onclick="() => _report.Open(true)"><Icon Name="doc" Size="14" /> Detailed report</button>
+        </span>
+    </div>
+
+    @foreach (var w in Result.Warnings)
+    {
+        <div class="notice notice-warn"><Icon Name="warn" Size="16" /><span class="small">@w</span></div>
+    }
+
+    <div class="stat-tiles six">
+        <div class="stat"><span class="stat-num">@Result.TotalJobs.ToString("N0")</span><span class="stat-lbl">Jobs</span></div>
+        <div class="stat"><span class="stat-num ok">@Result.CompletedCount.ToString("N0")</span><span class="stat-lbl">Completed</span></div>
+        <div class="stat"><span class="stat-num warn">@Result.WarningCount.ToString("N0")</span><span class="stat-lbl">With warnings</span></div>
+        <div class="stat"><span class="stat-num bad">@Result.FailedCount.ToString("N0")</span><span class="stat-lbl">Failed</span></div>
+        <div class="stat"><span class="stat-num info">@Result.InProgressCount.ToString("N0")</span><span class="stat-lbl">In progress</span></div>
+        <div class="stat"><span class="stat-num">@Result.DistinctItems</span><span class="stat-lbl">Items with jobs</span></div>
+    </div>
+
+    @if (Result.TotalJobs == 0)
+    {
+        <div class="card empty">
+            <p class="ok"><Icon Name="check" Size="16" /> No backup jobs ran for this @Flow.Label() in the @Result.TimeRangeLabel.</p>
+            <p class="muted small">If you expected activity, widen the time range or check that the policies' schedules are still enabled.</p>
+        </div>
+    }
+    else if (Result.Activities.Count == 0)
+    {
+        <div class="card empty">
+            <p class="ok"><Icon Name="check" Size="16" /> Every job in the @Result.TimeRangeLabel completed without failures or warnings.</p>
+            <p class="muted small">@Result.HealthyItems.Count item(s) ran clean: @string.Join(", ", Result.HealthyItems.Take(8))@(Result.HealthyItems.Count > 8 ? $" (+{Result.HealthyItems.Count - 8} more)" : "").</p>
+        </div>
+    }
+    else
+    {
+        <h3 class="section-title">Failure assessment <span class="count">@Result.Activities.Count</span></h3>
+        <div class="chips class-filter" role="group" aria-label="Filter by assessment">
+            <button type="button" class="chip chip-btn @(_classFilter is null ? "active" : "")" @onclick="() => SetClassFilter(null)">All <span class="count">@Result.Activities.Count</span></button>
+            @foreach (var c in Classifications)
+            {
+                var n = Result.Activities.Count(x => x.Classification == c);
+                <button type="button" class="chip chip-btn @ClassCss(c) @(_classFilter == c ? "active" : "")" @onclick="() => SetClassFilter(c)">@c <span class="count">@n</span></button>
+            }
+        </div>
+        @if (!FilteredActivities.Any())
+        {
+            <p class="muted small">No items match the "@_classFilter" filter.</p>
+        }
+        @foreach (var a in FilteredActivities)
+        {
+            var cls = ClassCss(a.Classification);
+            <article class="card activity @cls">
+                <div class="activity-head">
+                    <button type="button" class="class-pill @cls" title="Show only @a.Classification" @onclick="() => SetClassFilter(a.Classification)">@a.Classification</button>
+                    <b>@a.ItemName</b>
+                    <span class="chip">@a.WorkloadType</span>
+                    @if (!a.Operation.Equals("Backup", StringComparison.OrdinalIgnoreCase)) { <span class="chip">@a.Operation</span> }
+                    @if (!string.IsNullOrEmpty(a.PolicyName)) { <span class="muted small">policy: @a.PolicyName</span> }
+                    <span class="ml-auto muted small">@a.Failed failed · @a.Succeeded succeeded@(a.Warnings > 0 ? $" · {a.Warnings} with warnings" : "")</span>
+                </div>
+                <p class="small">@a.Explanation</p>
+                <div class="samples">
+                    @if (!string.IsNullOrEmpty(a.ErrorMessage))
+                    {
+                        <div><span class="muted small">Error</span><div class="small">@a.ErrorMessage</div></div>
+                    }
+                    <div>
+                        <span class="muted small">Timeline</span>
+                        <div class="small">
+                            @if (a.LastFailureTime is { } f) { <div>Last failure @f.ToString("yyyy-MM-dd HH:mm") UTC</div> }
+                            @if (a.LastSuccessTime is { } s) { <div>Last success @s.ToString("yyyy-MM-dd HH:mm") UTC</div> } else { <div class="bad">No success in this window</div> }
+                            @if (a.AverageDuration is { } d) { <div>Average duration @Duration(d)</div> }
+                        </div>
+                    </div>
+                    @if (a.SampleJobIds.Count > 0)
+                    {
+                        <div><span class="muted small">Failed job IDs</span>@foreach (var j in a.SampleJobIds) { <div class="mono small trunc" title="@j">@j</div> }</div>
+                    }
+                </div>
+                @if (a.Recommendations.Count > 0)
+                {
+                    <ul class="recs small">
+                        @foreach (var r in a.Recommendations) { <li><Icon Name="bolt" Size="12" /> @r</li> }
+                    </ul>
+                }
+                <div class="activity-foot">
+                    <button class="btn btn-ghost btn-sm" @onclick="() => OpenFix(a)"><Icon Name="terminal" Size="14" /> Fix script</button>
+                </div>
+            </article>
+        }
+        @if (Result.HealthyItems.Count > 0)
+        {
+            <p class="muted small mt"><Icon Name="check" Size="14" Class="ok" /> @Result.HealthyItems.Count item(s) ran only successful jobs: @string.Join(", ", Result.HealthyItems.Take(8))@(Result.HealthyItems.Count > 8 ? $" (+{Result.HealthyItems.Count - 8} more)" : "").</p>
+        }
+    }
+}
+
+<div class="actions end">
+    <a class="btn btn-ghost" href="/@Flow.Route()/grades"><Icon Name="back" Size="16" /> Back to grades</a>
+</div>
+
+<Modal Visible="_changesOpen" Title="@($"Changes vs the previous {Result?.TimeRangeLabel.Replace("last ", "")}")" OnClose="() => _changesOpen = false">
+    @if (Result is null || Result.Changes.Count == 0)
+    {
+        <p class="muted">No significant changes — the same items ran with similar outcomes in both periods.</p>
+    }
+    else
+    {
+        <ul class="changes">
+            @foreach (var c in Result.Changes)
+            {
+                <li><span class="change @ChangeCss(c.ChangeType)">@c.ChangeType</span> <b>@c.ItemName</b> <span class="small">— @c.Description</span></li>
+            }
+        </ul>
+    }
+</Modal>
+
+<FixScriptModal @ref="_fix" Flow="Flow" />
+<ReportModal @ref="_report" Flow="Flow" />
+
+@code {
+    [Parameter] public BackupFlowKind Flow { get; set; }
+
+    private ReportModal _report = default!;
+    private FixScriptModal _fix = default!;
+    private string _targetId = "";
+    private string _timeRange = "7d";
+    private bool _running;
+    private bool _changesOpen;
+
+    private FlowState State => Flows.State.For(Flow);
+    private BackupScanResult? Scan => State.Scan;
+    private BackupJobAnalysis? Result => State.JobAnalysis;
+
+    private List<(string Id, string Name, int Items)> Targets => Scan is null ? [] :
+        Scan.Vaults.Where(v => v.Items.Count > 0).Select(v => (v.Id, v.Name, v.Items.Count))
+            .OrderBy(t => t.Item2, StringComparer.OrdinalIgnoreCase).ToList();
+
+    protected override void OnInitialized()
+    {
+        var initial = Targets.FirstOrDefault(t => t.Id.Equals(Result?.TargetId, StringComparison.OrdinalIgnoreCase));
+        if (initial.Id is null) initial = Targets.FirstOrDefault();
+        if (initial.Id is not null) _targetId = initial.Id;
+        if (Result is not null) _timeRange = Result.TimeRangeKey;
+    }
+
+    private void OnTargetChanged(ChangeEventArgs e) => _targetId = e.Value?.ToString() ?? "";
+
+    private async Task RunAsync()
+    {
+        var target = Targets.FirstOrDefault(t => t.Id.Equals(_targetId, StringComparison.OrdinalIgnoreCase));
+        if (target.Id is null) return;
+        _running = true;
+        StateHasChanged();
+        try
+        {
+            await Flows.AnalyzeJobsAsync(Flow, target.Id, target.Name, _timeRange);
+        }
+        catch (Exception ex)
+        {
+            State.JobAnalysis = new BackupJobAnalysis { Flow = Flow, TargetId = target.Id, TargetName = target.Name, JobsQueryable = false, QueryError = ex.Message };
+        }
+        finally
+        {
+            _running = false;
+        }
+    }
+
+    private void OpenFix(BackupJobActivity a) => _fix.Open(a);
+
+    private static readonly string[] Classifications = ["Persistent failure", "Needs review", "Transient failure"];
+    private string? _classFilter;
+
+    private IEnumerable<BackupJobActivity> FilteredActivities =>
+        Result is null ? [] : Result.Activities.Where(a => _classFilter is null || a.Classification == _classFilter);
+
+    /// <summary>Clicking the active filter (or a card's pill while it is already selected) clears it.</summary>
+    private void SetClassFilter(string? classification) => _classFilter = _classFilter == classification ? null : classification;
+
+    private static string Duration(TimeSpan d) => d.TotalHours >= 1 ? $"{d.TotalHours:0.#} h" : $"{d.TotalMinutes:0} min";
+
+    private static string ClassCss(string classification) => classification switch
+    {
+        "Persistent failure" => "attack",
+        "Transient failure" => "fp",
+        _ => "review"
+    };
+
+    private static string ChangeCss(string type) => type.ToLowerInvariant() switch
+    {
+        "new failure" => "new", "recovered" => "blocking", "slower" => "logonly", "stopped" => "stopped", "increased" => "increased", _ => "decreased"
+    };
+}

@@ -1,0 +1,78 @@
+@page "/"
+@inject BackupFlowService Flows
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<PageTitle>RateMyAzureBackups</PageTitle>
+
+<section class="hero">
+    <h1>How good are your Azure backups?</h1>
+    <p class="lead">
+        RateMyAzureBackups finds every backup vault in your Azure tenant, grades each one from
+        <b>A</b> to <b>F</b> using a 100-point model weighted the way Microsoft's backup best practices are, and tells you
+        exactly which change lifts the grade. Read-only, three steps, one vault product at a time.
+    </p>
+</section>
+
+<section class="flow-cards">
+    <a class="flow-card" href="/recovery-services">
+        <div class="flow-card-icon"><Icon Name="rsv" Size="30" /></div>
+        <h2>Recovery Services vaults</h2>
+        <p>Azure VMs, SQL and SAP HANA in VMs, Azure Files and MARS. Every protected item is checked for health and a recent recovery point, and VMs nobody backs up are called out.</p>
+        <span class="btn btn-primary">Rate Recovery Services vaults <Icon Name="arrow" Size="16" /></span>
+    </a>
+    <a class="flow-card" href="/backup-vaults">
+        <div class="flow-card-icon"><Icon Name="bvault" Size="30" /></div>
+        <h2>Backup vaults</h2>
+        <p>Blob storage, managed disks, PostgreSQL, MySQL and AKS backup instances. Vault redundancy, soft delete, immutability and recent job outcomes are rated with the same engine.</p>
+        <span class="btn btn-primary">Rate Backup vaults <Icon Name="arrow" Size="16" /></span>
+    </a>
+</section>
+
+<section class="card">
+    <h2 class="card-title">How the grade is built</h2>
+    <p class="muted">100 points across six categories, mapped to a letter. Hard caps stop a good score hiding a critical gap.</p>
+    <div class="weights">
+        <div class="weight"><span class="weight-pts">30</span><span class="weight-name">Protection health</span><span class="weight-desc">Every protected item actively protected, none stopped or in error</span></div>
+        <div class="weight"><span class="weight-pts">20</span><span class="weight-name">Backup freshness</span><span class="weight-desc">A recent, successful recovery point for every item</span></div>
+        <div class="weight"><span class="weight-pts">20</span><span class="weight-name">Redundancy &amp; restore</span><span class="weight-desc">Geo-redundant storage 12 · Cross Region Restore 8</span></div>
+        <div class="weight"><span class="weight-pts">15</span><span class="weight-name">Vault security</span><span class="weight-desc">Soft delete 5 · immutability 5 · multi-user auth 3 · no public access 2</span></div>
+        <div class="weight"><span class="weight-pts">10</span><span class="weight-name">Policy hygiene</span><span class="weight-desc">Daily schedule 4 · 30-day retention 3 · long-term retention 3</span></div>
+        <div class="weight"><span class="weight-pts">5</span><span class="weight-name">Monitoring &amp; alerts</span><span class="weight-desc">Job-failure alerts 3 · diagnostics to Log Analytics 2</span></div>
+    </div>
+    <div class="legend-grid">
+        @foreach (var (g, label, desc) in BackupRatingService.Legend)
+        {
+            <div class="legend-row" style="background:@(BackupRatingService.ColorForGrade(g))1A;">
+                <GradeBadge Grade="@g" Small="true" />
+                <div><b style="color:@BackupRatingService.ColorForGrade(g);">@label</b> <span class="muted">· @Band(g)</span><div class="small">@desc</div></div>
+            </div>
+        }
+    </div>
+    <p class="small muted caps">
+        <b>Caps:</b> nothing protected → F · any item stopped or in error → at most D · any last backup failed → at most C ·
+        soft delete off → at most C · locally redundant storage → at most B.
+    </p>
+</section>
+
+<section class="card demo-strip">
+    <div>
+        <h2 class="card-title">No Azure access right now?</h2>
+        <p class="muted">Explore both flows with a realistic sample estate. Nothing is sent to Azure.</p>
+    </div>
+    <button class="btn btn-ghost" @onclick="TryDemo"><Icon Name="spark" Size="16" /> Try with sample data</button>
+</section>
+
+@code {
+    private static string Band(string grade) => grade switch
+    {
+        "A" => "90–100", "B" => "75–89", "C" => "60–74", "D" => "45–59", "E" => "30–44", _ => "0–29"
+    };
+
+    private async Task TryDemo()
+    {
+        Flows.EnterDemoMode();
+        try { await JS.InvokeVoidAsync("rmab.setItem", "rmab.demo", "1"); } catch { }
+        Nav.NavigateTo("/recovery-services");
+    }
+}

@@ -1,0 +1,53 @@
+@* Full detail for one backup policy: schedule, retention and the items that follow it. *@
+<div class="policy-detail">
+    <div class="detail-grid">
+        <div>
+            <h4>Schedule &amp; retention</h4>
+            <dl class="kv">
+                <dt>Workload</dt><dd>@Policy.WorkloadType</dd>
+                <dt>Schedule</dt><dd>@(string.IsNullOrEmpty(Policy.ScheduleSummary) ? "—" : Policy.ScheduleSummary)</dd>
+                @if (Policy.DailyRetentionDays is { } d) { <dt>Daily retention</dt><dd>@d days</dd> }
+                @if (Policy.WeeklyRetentionWeeks is { } w) { <dt>Weekly retention</dt><dd>@w weeks</dd> }
+                @if (Policy.MonthlyRetentionMonths is { } m) { <dt>Monthly retention</dt><dd>@m months</dd> }
+                @if (Policy.YearlyRetentionYears is { } y) { <dt>Yearly retention</dt><dd>@y years</dd> }
+                @if (Policy.InstantRpRetentionDays is { } rp) { <dt>Instant restore snapshots</dt><dd>@rp day@(rp == 1 ? "" : "s")</dd> }
+                @if (Policy.LogBackupFrequencyMinutes is { } lf) { <dt>Log backups</dt><dd>every @lf min@(Policy.LogRetentionDays is { } lr ? $", kept {lr} days" : "")</dd> }
+                @if (!string.IsNullOrEmpty(Policy.TimeZone)) { <dt>Time zone</dt><dd>@Policy.TimeZone</dd> }
+                @if (!string.IsNullOrEmpty(Policy.PolicyType)) { <dt>Policy type</dt><dd>@Policy.PolicyType</dd> }
+                <dt>Resource group</dt><dd>@Policy.ResourceGroup</dd>
+            </dl>
+            <ul class="small mt checks">
+                <li class="@(Policy.IsDailyOrBetter ? "ok" : "warn")"><Icon Name="@(Policy.IsDailyOrBetter ? "check" : "warn")" Size="14" /> @(Policy.IsDailyOrBetter ? "Backs up daily or more often" : string.IsNullOrEmpty(Policy.ScheduleFrequency) ? "Schedule frequency unknown" : "Backs up less than daily")</li>
+                <li class="@(Policy.ShortTermRetentionDays >= BackupRatingService.MinimumRetentionDays ? "ok" : "warn")"><Icon Name="@(Policy.ShortTermRetentionDays >= BackupRatingService.MinimumRetentionDays ? "check" : "warn")" Size="14" /> @(Policy.ShortTermRetentionDays is null ? "Retention unknown" : Policy.ShortTermRetentionDays >= BackupRatingService.MinimumRetentionDays ? $"Keeps recovery points at least {BackupRatingService.MinimumRetentionDays} days" : $"Keeps recovery points only {Policy.ShortTermRetentionDays} days")</li>
+                <li class="@(Policy.HasLongTermRetention ? "ok" : "warn")"><Icon Name="@(Policy.HasLongTermRetention ? "check" : "warn")" Size="14" /> @(Policy.HasLongTermRetention ? "Long-term retention configured" : "No weekly, monthly or yearly retention")</li>
+            </ul>
+        </div>
+        <div>
+            <h4>Items following this policy <span class="count">@(Items.Count > 0 ? Items.Count : Policy.ProtectedItemCount)</span></h4>
+            @if (Items.Count == 0)
+            {
+                <p class="muted small">@(Policy.ProtectedItemCount > 0 ? $"Azure reports {Policy.ProtectedItemCount} item(s) on this policy, but none were matched in the scan." : "No item uses this policy.")</p>
+            }
+            else
+            {
+                <ul class="surfaces">
+                    @foreach (var i in Items)
+                    {
+                        var good = i.IsActive && i.LastBackupSucceeded != false;
+                        <li class="@(good ? "ok" : "bad")">
+                            <Icon Name="@(good ? "check" : "x")" Size="14" />
+                            <span class="mono">@i.Display</span>
+                            <span class="chip">@i.WorkloadType</span>
+                            <span class="muted small">@(string.IsNullOrEmpty(i.ProtectionState) ? "" : i.ProtectionState)@(i.LastBackupTime is { } t ? $" · last backup {t:yyyy-MM-dd HH:mm} UTC" : "")</span>
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public BackupPolicyInfo Policy { get; set; } = default!;
+    [Parameter] public List<ProtectedItemInfo> Items { get; set; } = [];
+}

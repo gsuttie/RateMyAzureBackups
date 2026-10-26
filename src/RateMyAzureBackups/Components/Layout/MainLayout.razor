@@ -1,0 +1,56 @@
+@inherits LayoutComponentBase
+@inject NavigationManager Nav
+@inject SessionState State
+@inject BackupFlowService Flows
+@inject IJSRuntime JS
+
+<header class="topbar">
+    <div class="topbar-inner">
+        <a class="brand" href="/">
+            <Icon Name="vault" Size="26" />
+            <span>Rate<b>My</b>AzureBackups</span>
+        </a>
+        <nav class="flow-tabs">
+            <a class="flow-tab @(IsActive("recovery-services") ? "active" : "")" href="/recovery-services">
+                <Icon Name="rsv" Size="16" /> Recovery Services vaults
+            </a>
+            <a class="flow-tab @(IsActive("backup-vaults") ? "active" : "")" href="/backup-vaults">
+                <Icon Name="bvault" Size="16" /> Backup vaults
+            </a>
+        </nav>
+        <div class="topbar-right">
+            @if (State.DemoMode)
+            {
+                <button class="pill pill-demo" title="Sample data is shown. Click to switch back to Azure." @onclick="LeaveDemo">Sample data</button>
+            }
+            <button class="icon-btn" title="Toggle light / dark" onclick="rmab.toggleTheme()">
+                <Icon Name="theme" Size="18" />
+            </button>
+        </div>
+    </div>
+</header>
+
+<main class="page">
+    @Body
+</main>
+
+<footer class="footer">
+    Read-only assessment: RateMyAzureBackups never changes an Azure resource. Grades follow the backup scoring model (100 points, six weighted categories, hard caps).
+</footer>
+
+<div id="blazor-error-ui" class="blazor-error">
+    Something went wrong on the server. <a href="" class="reload">Reload</a>
+    <a class="dismiss">✕</a>
+</div>
+
+@code {
+    private bool IsActive(string route) =>
+        Nav.ToBaseRelativePath(Nav.Uri).StartsWith(route, StringComparison.OrdinalIgnoreCase);
+
+    private async Task LeaveDemo()
+    {
+        Flows.ExitDemoMode();
+        try { await JS.InvokeVoidAsync("rmab.setItem", "rmab.demo", null); } catch { }
+        Nav.NavigateTo("/", forceLoad: false);
+    }
+}

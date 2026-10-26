@@ -1,0 +1,402 @@
+@inject BackupFlowService Flows
+@inject NavigationManager Nav
+
+@if (Scan is null)
+{
+    <div class="card empty"><p>No scan yet. <a href="/@Flow.Route()">Choose a scope</a> first.</p></div>
+    return;
+}
+
+<div class="results-bar">
+    <span class="muted small">
+        Scanned @Scan.SubscriptionIds.Count subscription@(Scan.SubscriptionIds.Count == 1 ? "" : "s") · @Scan.CompletedAt.ToString("yyyy-MM-dd HH:mm")
+        @if (Flows.State.DemoMode) { <span class="pill pill-demo sm">sample</span> }
+    </span>
+    <span class="results-actions">
+        <a class="btn btn-ghost btn-sm" href="/@Flow.Route()"><Icon Name="refresh" Size="14" /> Rescan</a>
+        <button class="btn btn-ghost btn-sm" @onclick="() => _report.Open(false)"><Icon Name="doc" Size="14" /> Summary report</button>
+        <button class="btn btn-ghost btn-sm" @onclick="() => _report.Open(true)"><Icon Name="doc" Size="14" /> Detailed report</button>
+        @if (HasJobTargets)
+        {
+            <a class="btn btn-primary btn-sm" href="/@Flow.Route()/jobs"><Icon Name="jobs" Size="14" /> Analyse jobs</a>
+        }
+    </span>
+</div>
+
+@foreach (var w in Scan.Warnings.Distinct())
+{
+    <div class="notice notice-warn"><Icon Name="warn" Size="16" /><span class="small">@w</span></div>
+}
+
+@if (Scan.Ratings.Count == 0)
+{
+    <div class="card empty">
+        <h2>No @Flow.PluralLabel() found</h2>
+        <p class="muted">The selected subscriptions contain no @Flow.PluralLabel() to rate.</p>
+    </div>
+}
+else
+{
+    var worst = BackupRatingService.Worst(Scan.Ratings)!;
+    var avg = (int)Math.Round(Scan.Ratings.Average(r => r.Score));
+    <section class="card overall">
+        <div class="overall-grade">
+            <GradeBadge Grade="@worst.Grade" Large="true" />
+            <div>
+                <div class="overall-label" style="color:@BackupRatingService.ColorForGrade(worst.Grade);">@worst.GradeLabel.ToUpperInvariant()</div>
+                <div class="muted small">
+                    @if (Scan.Ratings.Count == 1)
+                    {
+                        <span>'@worst.TargetName' scores @worst.Score/100.</span>
+                    }
+                    else
+                    {
+                        <span>The weakest @Flow.Label() sets the grade ('@worst.TargetName', @worst.Score/100). Average @avg/100 across @Scan.Ratings.Count @Flow.PluralLabel().</span>
+                    }
+                </div>
+                <button class="link small" @onclick="() => _showLegend = !_showLegend">@(_showLegend ? "Hide" : "Show") the A–F legend</button>
+            </div>
+        </div>
+        <div class="stat-tiles">
+            <div class="stat"><span class="stat-num">@Scan.VaultCount</span><span class="stat-lbl">@Flow.PluralLabel()</span></div>
+            <div class="stat"><span class="stat-num">@Scan.ItemCount</span><span class="stat-lbl">@Flow.ItemPluralLabel()</span></div>
+            <div class="stat"><span class="stat-num @(Broken > 0 ? "bad" : "ok")">@Broken</span><span class="stat-lbl">Stopped / failed</span></div>
+            @if (Flow == BackupFlowKind.RecoveryServices)
+            {
+                <div class="stat"><span class="stat-num @(Scan.UnprotectedResources.Count > 0 ? "bad" : "ok")">@Scan.UnprotectedResources.Count</span><span class="stat-lbl">VMs without backup</span></div>
+            }
+            else
+            {
+                <div class="stat"><span class="stat-num @(HighFindings > 0 ? "bad" : "ok")">@HighFindings</span><span class="stat-lbl">High findings</span></div>
+            }
+        </div>
+        @if (_showLegend)
+        {
+            <div class="legend-grid mt">
+                @foreach (var (g, label, desc) in BackupRatingService.Legend)
+                {
+                    <div class="legend-row" style="background:@(BackupRatingService.ColorForGrade(g))1A;">
+                        <GradeBadge Grade="@g" Small="true" />
+                        <div><b style="color:@BackupRatingService.ColorForGrade(g);">@label</b><div class="small">@desc</div></div>
+                    </div>
+                }
+            </div>
+        }
+    </section>
+
+    <section class="rating-list">
+        @foreach (var r in Scan.Ratings.OrderByDescending(r => r.Grade, StringComparer.Ordinal).ThenBy(r => r.Score).ThenBy(r => r.TargetName, StringComparer.OrdinalIgnoreCase))
+        {
+            var open = _expanded.Contains(r.TargetId);
+            var vault = Vault(r.TargetId)!;
+            <article class="card rating @(open ? "open" : "")">
+                <button class="rating-row" @onclick="() => Toggle(r.TargetId)" aria-expanded="@open">
+                    <GradeBadge Grade="@r.Grade" />
+                    <span class="rating-name">
+                        <b>@r.TargetName</b>
+                        <span class="chips">
+                            <span class="chip">@vault.RedundancyLabel</span>
+                            <span class="chip">@vault.Items.Count @(vault.Items.Count == 1 ? Flow.ItemLabel() : Flow.ItemPluralLabel())</span>
+                            <span class="chip muted">@Flows.SubscriptionName(r.SubscriptionId)</span>
+                        </span>
+                    </span>
+                    <span class="rating-bar"><span style="width:@r.Score%;background:@BackupRatingService.ColorForGrade(r.Grade);"></span></span>
+                    <span class="rating-score">@r.Score<span class="muted">/100</span></span>
+                    <Icon Name="@(open ? "down" : "chevron")" Size="18" Class="muted" />
+                </button>
+
+                @if (r.CapReason is not null)
+                {
+                    <div class="cap"><Icon Name="lock" Size="14" /> Grade capped: @r.CapReason</div>
+                }
+                @if (!open && r.Improvements.Count > 0)
+                {
+                    <div class="next-fix"><Icon Name="bolt" Size="14" /> Biggest win: @r.Improvements[0].Action <span class="pts">+@r.Improvements[0].PointsGained</span></div>
+                }
+
+                @if (open)
+                {
+                    <div class="rating-detail">
+                        <div class="detail-grid">
+                            <div>
+                                <h4>Score breakdown</h4>
+                                <table class="cats">
+                                    @foreach (var c in r.Categories)
+                                    {
+                                        <tr>
+                                            <td class="cat-name">@c.Name</td>
+                                            <td class="cat-bar"><span><span style="width:@(c.Possible == 0 ? 0 : c.Earned * 100 / c.Possible)%;" class="@(c.Earned == c.Possible ? "full" : c.Earned == 0 ? "none" : "")"></span></span></td>
+                                            <td class="cat-score @(c.Earned == c.Possible ? "ok" : c.Earned == 0 ? "bad" : "")">@c.Earned<span class="muted">/@c.Possible</span></td>
+                                            <td class="cat-notes muted">@string.Join(" ", c.Details)</td>
+                                        </tr>
+                                    }
+                                </table>
+                            </div>
+                            <div>
+                                <h4>How to improve</h4>
+                                @if (r.Improvements.Count == 0)
+                                {
+                                    <p class="ok small"><Icon Name="check" Size="14" /> Nothing to improve — full marks.</p>
+                                }
+                                else
+                                {
+                                    <ol class="improvements">
+                                        @foreach (var imp in r.Improvements)
+                                        {
+                                            <li>
+                                                <span class="pts">+@imp.PointsGained</span>
+                                                <span>@imp.Action
+                                                    @if (BackupRatingService.WorstGrade(imp.ResultingGrade, r.Grade) != imp.ResultingGrade)
+                                                    {
+                                                        <b style="color:@BackupRatingService.ColorForGrade(imp.ResultingGrade);"> → grade @imp.ResultingGrade</b>
+                                                    }
+                                                </span>
+                                            </li>
+                                        }
+                                    </ol>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="detail-grid">
+                            <div>
+                                <h4>@(Flow == BackupFlowKind.RecoveryServices ? "Protected items" : "Backup instances")</h4>
+                                @if (vault.Items.Count == 0)
+                                {
+                                    <p class="muted small">Nothing is protected by this vault.</p>
+                                }
+                                else
+                                {
+                                    <ul class="surfaces">
+                                        @foreach (var i in vault.Items)
+                                        {
+                                            var good = i.IsActive && i.LastBackupSucceeded != false;
+                                            <li class="@(good ? "ok" : "bad")">
+                                                <Icon Name="@(good ? "check" : "x")" Size="14" />
+                                                <span class="mono">@i.Display</span>
+                                                <span class="chip">@i.WorkloadType</span>
+                                                @if (!i.IsActive) { <span class="chip warn">@i.ProtectionState</span> }
+                                                <span class="muted small">@LastBackupText(i)</span>
+                                            </li>
+                                        }
+                                    </ul>
+                                }
+                            </div>
+                            <div>
+                                <h4>Vault configuration</h4>
+                                <dl class="kv">
+                                    <dt>Redundancy</dt><dd>@vault.RedundancyLabel @(vault.CrossRegionRestore == true ? "· Cross Region Restore on" : vault.CrossRegionRestore == false ? "· no Cross Region Restore" : "")</dd>
+                                    <dt>Soft delete</dt><dd>@(string.IsNullOrEmpty(vault.SoftDeleteState) ? "unknown" : vault.SoftDeleteState)@(vault.SoftDeleteRetentionDays is { } sd ? $" ({sd} days)" : "")</dd>
+                                    <dt>Immutability</dt><dd>@(string.IsNullOrEmpty(vault.ImmutabilityState) ? "Disabled" : vault.ImmutabilityState)</dd>
+                                    <dt>Multi-user auth</dt><dd>@Flag(vault.MultiUserAuthorization)</dd>
+                                    <dt>Public network</dt><dd>@(string.IsNullOrEmpty(vault.PublicNetworkAccess) ? "unknown" : vault.PublicNetworkAccess)</dd>
+                                    <dt>Job alerts</dt><dd>@Flag(vault.AlertsForAllJobFailures)</dd>
+                                    @if (!string.IsNullOrEmpty(vault.SecureScore)) { <dt>Azure secure score</dt><dd>@vault.SecureScore</dd> }
+                                </dl>
+                                @{ var linked = Scan.Policies.Where(p => p.VaultId.Equals(vault.Id, StringComparison.OrdinalIgnoreCase)).OrderBy(p => p.Name).ToList(); }
+                                <h4 class="mt">Policies</h4>
+                                @if (linked.Count == 0)
+                                {
+                                    <p class="muted small">No backup policy found on this vault.</p>
+                                }
+                                else
+                                {
+                                    <ul class="policy-chips">
+                                        @foreach (var p in linked)
+                                        {
+                                            <li><button class="chip chip-btn" @onclick="() => TogglePolicy(p.Id)"><Icon Name="clock" Size="12" /> @p.Name <span class="muted">· @(string.IsNullOrEmpty(p.ScheduleFrequency) ? "schedule unknown" : p.ScheduleFrequency)</span></button></li>
+                                        }
+                                    </ul>
+                                }
+                                <p class="small mt">
+                                    <b>Diagnostics:</b><span>&nbsp;</span>
+                                    @if (vault.DiagnosticsEnabled == true) { <span class="ok">enabled</span> <span class="muted">→ @(vault.LogDestinations.Count > 0 ? string.Join(" · ", vault.LogDestinations) : "destination unknown")</span> }
+                                    else if (vault.DiagnosticsEnabled == false) { <span class="bad">not configured</span> }
+                                    else { <span class="muted">unknown</span> }
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                }
+            </article>
+        }
+    </section>
+}
+
+@if (Flow == BackupFlowKind.RecoveryServices && (Scan.UnprotectedResources.Count > 0 || Scan.VirtualMachineCount > 0))
+{
+    <section class="card">
+        <div class="card-head">
+            <h2 class="card-title">Virtual machines without backup <span class="count">@Scan.UnprotectedResources.Count</span></h2>
+            <span class="muted small">@(Scan.VirtualMachineCount - Scan.UnprotectedResources.Count) of @Scan.VirtualMachineCount VMs in scope are backed up by a vault in scope.</span>
+        </div>
+        @if (Scan.UnprotectedResources.Count == 0)
+        {
+            <p class="ok"><Icon Name="check" Size="16" /> Every virtual machine in the selected subscriptions is protected.</p>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table class="table">
+                    <thead><tr><th>Virtual machine</th><th>Resource group</th><th>Location</th><th>Power state</th><th>Subscription</th></tr></thead>
+                    <tbody>
+                        @foreach (var r in Scan.UnprotectedResources)
+                        {
+                            <tr>
+                                <td><b>@r.Name</b></td>
+                                <td class="mono small">@r.ResourceGroup</td>
+                                <td>@r.Location</td>
+                                <td>@(string.IsNullOrEmpty(r.PowerState) ? "—" : r.PowerState)</td>
+                                <td class="small">@Flows.SubscriptionName(r.SubscriptionId)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+}
+
+<section class="card">
+    <div class="card-head">
+        <h2 class="card-title">Findings <span class="count">@Scan.Findings.Count</span></h2>
+        <span class="muted small">Report only — nothing is changed. Each finding comes with its fix.</span>
+    </div>
+    @if (Scan.Findings.Count == 0)
+    {
+        <p class="ok"><Icon Name="check" Size="16" /> No issues found — every item is protected and fresh, every vault is redundant, soft-deleted and immutable.</p>
+    }
+    else
+    {
+        @foreach (var group in Scan.Findings.GroupBy(f => f.Severity).OrderBy(g => BackupFindingsBuilder.SeverityOrder(g.Key)))
+        {
+            <h4 class="sev-head"><span class="sev @group.Key.ToLowerInvariant()">@group.Key</span> <span class="muted">@SeverityHeading(group.Key) · @group.Count()</span></h4>
+            <ul class="findings">
+                @foreach (var f in group)
+                {
+                    var key = f.ResourceId + "|" + f.Category + "|" + f.Message;
+                    var openFix = _openFixes.Contains(key);
+                    <li>
+                        <div class="finding-main">
+                            <span class="finding-cat">@f.Category</span>
+                            <span class="finding-msg">@f.Message</span>
+                            <span class="muted small">@Flows.SubscriptionName(f.SubscriptionId)</span>
+                        </div>
+                        <button class="link small" @onclick="() => ToggleFix(key)">@(openFix ? "Hide fix" : "How to fix")</button>
+                        @if (openFix)
+                        {
+                            <div class="fix"><Icon Name="bolt" Size="14" /> @f.Fix</div>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+    }
+</section>
+
+<section class="card">
+    <div class="card-head">
+        <h2 class="card-title">Backup policies <span class="count">@Scan.Policies.Count</span></h2>
+        <span class="muted small">Click a policy for its schedule, retention and the items that follow it.</span>
+    </div>
+    @if (Scan.Policies.Count == 0)
+    {
+        <p class="muted">No backup policies in scope.</p>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table class="table policies">
+                <thead>
+                    <tr><th></th><th>Policy</th><th>Workload</th><th>Schedule</th><th>Retention</th><th class="num">Items</th><th>Vault</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var p in Scan.Policies.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase))
+                    {
+                        var open = _expandedPolicies.Contains(p.Id);
+                        var items = ItemsOn(p);
+                        <tr class="policy-row @(open ? "open" : "")" @onclick="() => TogglePolicy(p.Id)">
+                            <td><Icon Name="@(open ? "down" : "chevron")" Size="16" Class="muted" /></td>
+                            <td><b>@p.Name</b><div class="muted small">@Flows.SubscriptionName(p.SubscriptionId)</div></td>
+                            <td>@p.WorkloadType</td>
+                            <td>@(string.IsNullOrEmpty(p.ScheduleFrequency) ? Badge("—", "") : Badge(p.ScheduleSummary, p.IsDailyOrBetter ? "ok" : "warn"))</td>
+                            <td>@RetentionBadge(p)</td>
+                            <td class="num">@(items.Count > 0 ? items.Count : p.ProtectedItemCount)</td>
+                            <td class="small">@Services.Azure.Json.LastSegment(p.VaultId)</td>
+                        </tr>
+                        @if (open)
+                        {
+                            <tr class="policy-detail-row"><td colspan="7"><PolicyDetail Policy="p" Items="items" /></td></tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+<div class="actions end">
+    @if (HasJobTargets)
+    {
+        <a class="btn btn-primary" href="/@Flow.Route()/jobs"><Icon Name="jobs" Size="16" /> Analyse the backup jobs <Icon Name="arrow" Size="16" /></a>
+    }
+</div>
+
+<ReportModal @ref="_report" Flow="Flow" />
+
+@code {
+    [Parameter] public BackupFlowKind Flow { get; set; }
+
+    private ReportModal _report = default!;
+    private bool _showLegend;
+    private readonly HashSet<string> _expanded = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _expandedPolicies = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _openFixes = new(StringComparer.OrdinalIgnoreCase);
+
+    private BackupScanResult? Scan => Flows.State.For(Flow).Scan;
+
+    private int Broken => Scan?.AllItems.Count(i => !i.IsActive || i.LastBackupSucceeded == false) ?? 0;
+    private int HighFindings => Scan?.Findings.Count(f => f.Severity == "High") ?? 0;
+    private bool HasJobTargets => Scan is { } s && s.Vaults.Any(v => v.Items.Count > 0);
+
+    protected override void OnInitialized()
+    {
+        // Open the weakest vault by default so the first thing on screen is what to fix.
+        if (Scan is { Ratings.Count: > 0 } && _expanded.Count == 0)
+            _expanded.Add(BackupRatingService.Worst(Scan.Ratings)!.TargetId);
+    }
+
+    private void Toggle(string id) { if (!_expanded.Remove(id)) _expanded.Add(id); }
+    private void TogglePolicy(string id) { if (!_expandedPolicies.Remove(id)) _expandedPolicies.Add(id); }
+    private void ToggleFix(string key) { if (!_openFixes.Remove(key)) _openFixes.Add(key); }
+
+    private BackupVaultInfo? Vault(string id) => Scan?.Vaults.FirstOrDefault(v => v.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
+
+    private List<ProtectedItemInfo> ItemsOn(BackupPolicyInfo p) =>
+        Scan?.AllItems.Where(i => p.Id.Equals(i.PolicyId, StringComparison.OrdinalIgnoreCase)).ToList() ?? [];
+
+    private static string LastBackupText(ProtectedItemInfo i)
+    {
+        var status = string.IsNullOrEmpty(i.LastBackupStatus) ? "last backup unknown" : $"last backup {i.LastBackupStatus.ToLowerInvariant()}";
+        return i.LastBackupTime is { } t ? $"{status} · {BackupFindingsBuilder.Age(DateTimeOffset.UtcNow, t)}" : status;
+    }
+
+    private static string Flag(bool? value) => value switch { true => "Enabled", false => "Disabled", null => "unknown" };
+
+    private static string SeverityHeading(string severity) => severity switch
+    {
+        "High" => "Fix first", "Medium" => "Fix soon", _ => "Worth reviewing"
+    };
+
+    private static RenderFragment Badge(string text, string cls) => __builder =>
+    {
+        <span class="badge @cls">@text</span>
+    };
+
+    private static RenderFragment RetentionBadge(BackupPolicyInfo p) => __builder =>
+    {
+        var cls = p.ShortTermRetentionDays is null ? "" : p.ShortTermRetentionDays >= BackupRatingService.MinimumRetentionDays ? "ok" : "warn";
+        var title = p.ShortTermRetentionDays is null ? "Retention unknown" : $"Short-term retention {p.ShortTermRetentionDays} days; longest {p.MaxRetentionDays} days";
+        <span class="badge rs @cls" title="@title">@p.RetentionSummary</span>
+    };
+}

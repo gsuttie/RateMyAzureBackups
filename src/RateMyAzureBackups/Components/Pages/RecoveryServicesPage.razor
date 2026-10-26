@@ -1,0 +1,9 @@
+@page "/recovery-services"
+@page "/recovery-services/{Step}"
+
+<PageTitle>Recovery Services vaults · RateMyAzureBackups</PageTitle>
+<BackupFlow Flow="BackupFlowKind.RecoveryServices" Step="@Step" />
+
+@code {
+    [Parameter] public string? Step { get; set; }
+}
