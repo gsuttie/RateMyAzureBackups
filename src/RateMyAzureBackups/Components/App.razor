@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="/" />
-    <link rel="stylesheet" href="app.css?v=1" />
+    <link rel="stylesheet" href="app.css?v=@AssetVersion" />
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <script>
         // Apply the saved theme before first paint to avoid a flash.
@@ -21,8 +21,14 @@
 
 <body>
     <Routes @rendermode="new InteractiveServerRenderMode(prerender: false)" />
+    @* app.js defines window.rmab; it must be parsed before Blazor starts the circuit and invokes it. *@
+    <script src="app.js?v=@AssetVersion"></script>
     <script src="_framework/blazor.web.js"></script>
-    <script src="app.js?v=1"></script>
 </body>
 
 </html>
+
+@code {
+    // Changes on every build so browsers never keep a stale app.js/app.css across deployments.
+    private static readonly string AssetVersion = typeof(App).Assembly.ManifestModule.ModuleVersionId.ToString("N")[..8];
+}

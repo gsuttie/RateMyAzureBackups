@@ -9,6 +9,10 @@
             <button class="tab @(_reportType == BackupReportType.Extensive ? "active" : "")" @onclick="() => Switch(BackupReportType.Extensive)">Extensive</button>
         </div>
         <div class="report-preview">@((MarkupString)_html)</div>
+        @if (_copyFailed)
+        {
+            <div class="notice notice-error small">Markdown could not be copied. Check browser clipboard permissions and try again.</div>
+        }
     </ChildContent>
     <Footer>
         <span class="muted small">Word document or Markdown (for a GitHub issue), generated from the same content as this preview.</span>
@@ -31,12 +35,14 @@
     private BackupReportType _reportType = BackupReportType.Summary;
     private bool _downloading;
     private bool _copied;
+    private bool _copyFailed;
     private string _html = "";
 
     public void Open(BackupReportType reportType)
     {
         _reportType = reportType;
         _copied = false;
+        _copyFailed = false;
         Render();
         _visible = true;
         StateHasChanged();
@@ -44,10 +50,28 @@
 
     public void Open(bool findings) => Open(findings ? BackupReportType.Extensive : BackupReportType.Summary);
 
-    private void Switch(BackupReportType reportType) { _reportType = reportType; _copied = false; Render(); }
+    private async Task CopyMarkdownAsync()
+    {
+        _copied = false;
+        _copyFailed = false;
+        try
+        {
+            _copied = await JS.InvokeAsync<bool>("rmab.copy", Markdown(Flows.ReportContext(Flow)));
+            _copyFailed = !_copied;
+        }
+        catch (JSException)
+        {
+            _copyFailed = true;
+        }
+    }
 
-    private async Task CopyMarkdownAsync() =>
-        _copied = await JS.InvokeAsync<bool>("rmab.copy", Markdown(Flows.ReportContext(Flow)));
+    private void Switch(BackupReportType reportType)
+    {
+        _reportType = reportType;
+        _copied = false;
+        _copyFailed = false;
+        Render();
+    }
 
     private void Render()
     {
