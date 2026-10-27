@@ -1,0 +1,184 @@
+<div class="assessment-panel">
+<section class="card assessment">
+    <h2 class="card-title">Resource inventory and recovery requirements</h2>
+    <p class="muted small">@BackupAssessmentService.InventoryScope</p>
+    <p class="small">Resource Graph inventory read for @Scan.InventorySubscriptionIds.Distinct(StringComparer.OrdinalIgnoreCase).Count() of @Scan.SubscriptionIds.Distinct(StringComparer.OrdinalIgnoreCase).Count() selected subscriptions. @Scan.ResourceInventory.Count resources / backup sources listed.</p>
+    <label for="inventory-search">Filter inventory</label>
+    <input id="inventory-search" type="search" placeholder="Name, resource ID, type or protection state" @bind="_search" @bind:event="oninput" @bind:after="ResetPage" />
+    <div class="table-wrap">
+        <table class="table">
+            <thead><tr><th>Resource / scope</th><th>Type / source storage</th><th>Protection evidence</th><th>Environment</th><th>Recovery</th></tr></thead>
+            <tbody>
+                @foreach (var resource in Filtered.Skip(_page * PageSize).Take(PageSize))
+                {
+                    <tr>
+                        <td><b>@resource.Name</b><div class="mono small">@resource.Id</div><div class="small">@resource.ResourceGroup · @(string.IsNullOrEmpty(resource.Location) ? "location unknown" : resource.Location)</div></td>
+                        <td>@resource.ResourceType<div class="small">SKU: @(string.IsNullOrEmpty(resource.StorageConfiguration) ? "unknown / not applicable" : resource.StorageConfiguration)</div></td>
+                        <td>@resource.Protection<div class="small">@resource.BackupItemIds.Count linked backup item(s)</div></td>
+                        <td>@resource.Environment</td>
+                        <td><button class="btn btn-ghost btn-sm" @onclick="() => Edit(resource)">Document requirements</button></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    @if (!Filtered.Any()) { <p class="muted">No inventory entries match. An empty or failed inventory is not proof that everything is protected.</p> }
+    <div class="actions">
+        <button class="btn btn-ghost btn-sm" disabled="@(_page == 0)" @onclick="() => _page--">Previous resources</button>
+        <span class="small">Page @(_page + 1) of @Math.Max(1, (int)Math.Ceiling(Filtered.Count() / (double)PageSize))</span>
+        <button class="btn btn-ghost btn-sm" disabled="@((_page + 1) * PageSize >= Filtered.Count())" @onclick="() => _page++">Next resources</button>
+    </div>
+
+    @if (_editing is not null)
+    {
+        <h3>Recovery requirements: @_editing.Name</h3>
+        <p class="small muted">User-declared requirements, retained in this session only. Export a report before reload or rescan. Empty values mean not documented.</p>
+        <EditForm Model="_requirements" OnValidSubmit="Save" FormName="recovery-requirements" @key="_editing.Id">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+            <div class="detail-grid">
+                <div>
+                    <label for="recovery-environment">Environment (confirm or override tag)</label>
+                    <select id="recovery-environment" @bind="_environment">
+                        @foreach (var env in new[] { "Unknown", "Development", "Test", "Production", "Critical" })
+                        {
+                            <option value="@env">@env</option>
+                        }
+                    </select>
+                    <label for="recovery-owner">Recovery owner</label>
+                    <InputText id="recovery-owner" @bind-Value="_requirements.Owner" />
+                    <label for="recovery-rpo">Required RPO (hours)</label>
+                    <InputNumber id="recovery-rpo" min="1" @bind-Value="_requirements.RpoHours" />
+                    <label for="recovery-rto">Required RTO (hours)</label>
+                    <InputNumber id="recovery-rto" min="1" @bind-Value="_requirements.RtoHours" />
+                </div>
+                <div>
+                    <label for="recovery-retention">Required retention (days)</label>
+                    <InputNumber id="recovery-retention" min="1" @bind-Value="_requirements.RetentionDays" />
+                    <label for="recovery-evidence">Restore test date, timings and evidence</label>
+                    <InputTextArea id="recovery-evidence" @bind-Value="_requirements.RestoreTestEvidence" />
+                    <label for="recovery-notes">Recovery dependencies, limitations and compliance notes</label>
+                    <InputTextArea id="recovery-notes" @bind-Value="_requirements.Notes" />
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary btn-sm">Save requirements</button>
+            <button type="button" class="btn btn-ghost btn-sm" @onclick="() => _editing = null">Cancel</button>
+        </EditForm>
+    }
+    @if (!string.IsNullOrEmpty(_saved)) { <p role="status">@_saved</p> }
+</section>
+
+<section class="card">
+    <h2 class="card-title">Backup locations and storage</h2>
+    <div class="table-wrap">
+        <table class="table">
+            <thead><tr><th>Vault / resource ID</th><th>Primary backup region</th><th>Storage redundancy</th><th>Cross Region Restore</th></tr></thead>
+            <tbody>
+                @foreach (var vault in Scan.Vaults)
+                {
+                    <tr><td>@vault.Name<div class="mono small">@vault.Id</div></td><td>@vault.Location</td><td>@vault.RedundancyLabel<div class="small">@string.Join("; ", vault.StorageConfigurations)</div></td><td>@(vault.CrossRegionRestore is true ? "Enabled" : vault.CrossRegionRestore is false ? "Disabled" : "Unknown")</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <p class="small muted">Vault region describes vaulted backup location, not necessarily operational snapshots. Secondary regions, storage tiers and actual recovery-point locations require workload-specific verification. Source SKU is not backup storage redundancy.</p>
+</section>
+
+<section class="card">
+    <h2 class="card-title">Current backup costs</h2>
+    @if (Scan.IsSampleData) { <p class="notice notice-warn">Illustrative sample costs only; these are not live billing data.</p> }
+    <p class="small muted">@BackupAssessmentService.CostScope</p>
+    @foreach (var coverage in Scan.CostCoverage)
+    {
+        <p class="small">@coverage.SubscriptionId · @coverage.FromUtc.ToString("yyyy-MM-dd") to @coverage.ToUtc.ToString("yyyy-MM-dd") UTC · @(coverage.Available ? "Billing query complete" : $"Unavailable: {coverage.Error}")</p>
+    }
+    @if (Scan.CostCoverage.Count == 0) { <p>Billing data not collected.</p> }
+    @foreach (var total in Scan.Costs.GroupBy(c => c.Currency))
+    {
+        <p><b>@total.Key @total.Sum(c => c.Amount).ToString("N2")</b> reported subtotal (available subscriptions only).</p>
+    }
+    @if (Scan.CostCoverage.Any(c => c.Available) && Scan.Costs.Count == 0)
+    {
+        <p>No Backup-category charges returned for available subscriptions in this period; this does not establish zero total backup cost.</p>
+    }
+    <details>
+        <summary>Cost breakdown by billed resource and meter</summary>
+        <div class="table-wrap">
+            <table class="table">
+                <thead><tr><th>Subscription</th><th>Billed resource</th><th>Meter subcategory</th><th>Actual pre-tax cost</th></tr></thead>
+                <tbody>
+                    @foreach (var cost in Scan.Costs)
+                    {
+                        <tr><td>@cost.SubscriptionId</td><td class="mono small">@(string.IsNullOrEmpty(cost.ResourceId) ? "Unallocated" : cost.ResourceId)</td><td>@cost.Meter</td><td>@cost.Currency @cost.Amount.ToString("N2")</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </details>
+</section>
+
+<section class="card">
+    <h2 class="card-title">Recommended policies and recovery gaps</h2>
+    <p class="small muted">Proposed environment baselines, not approved requirements or universal Microsoft mandates. Existing vault grades use generic checks, not these environment-specific proposals. Full per-resource proposals and requirements are included in both reports.</p>
+    <p class="small"><a href="@BackupAssessmentService.BestPracticesUrl" target="_blank" rel="noopener noreferrer">Microsoft backup best practices</a> · <a href="@BackupAssessmentService.SupportMatrixUrl" target="_blank" rel="noopener noreferrer">Workload support matrix</a></p>
+    @foreach (var recommendation in BackupAssessmentService.Recommendations(Scan, Filtered.Skip(_page * PageSize).Take(PageSize)))
+    {
+        <details>
+            <summary>@recommendation.ResourceName · @recommendation.Environment · @recommendation.Workload</summary>
+            <p class="small">@recommendation.Policy</p>
+            <p class="small"><b>Recovery gaps:</b> @recommendation.RecoveryGap</p>
+        </details>
+    }
+</section>
+
+<section class="card">
+    <h2 class="card-title">Cost optimisation opportunities</h2>
+    <ul>@foreach (var opportunity in BackupAssessmentService.CostOpportunities(Scan)) { <li>@opportunity</li> }</ul>
+</section>
+
+<section class="card">
+    <h2 class="card-title">Recovery requirements and backup limitations</h2>
+    <ul>@foreach (var limitation in BackupAssessmentService.Limitations) { <li>@limitation</li> }</ul>
+</section>
+
+</div>
+
+@code {
+    [Parameter, EditorRequired] public BackupScanResult Scan { get; set; } = default!;
+    private const int PageSize = 25;
+    private string _search = "";
+    private int _page;
+    private ResourceInventoryInfo? _editing;
+    private RecoveryRequirements _requirements = new();
+    private string _environment = "Unknown";
+    private string _saved = "";
+
+    private IEnumerable<ResourceInventoryInfo> Filtered => Scan.ResourceInventory
+        .Where(r => string.IsNullOrWhiteSpace(_search) ||
+            $"{r.Name} {r.Id} {r.ResourceType} {r.Protection} {r.Environment}".Contains(_search, StringComparison.OrdinalIgnoreCase))
+        .OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase);
+
+    private void ResetPage() => _page = 0;
+
+    private void Edit(ResourceInventoryInfo resource)
+    {
+        _editing = resource;
+        _environment = resource.Environment;
+        var r = resource.Recovery;
+        _requirements = new RecoveryRequirements
+        {
+            Owner = r.Owner, RpoHours = r.RpoHours, RtoHours = r.RtoHours, RetentionDays = r.RetentionDays,
+            RestoreTestEvidence = r.RestoreTestEvidence, Notes = r.Notes
+        };
+        _saved = "";
+    }
+
+    private void Save()
+    {
+        if (_editing is null) return;
+        _editing.Environment = _environment;
+        _editing.Recovery = _requirements;
+        _saved = $"Requirements saved for {_editing.Name} in this session. Export a report to retain them.";
+        _editing = null;
+    }
+}

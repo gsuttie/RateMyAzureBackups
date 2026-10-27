@@ -16,4 +16,7 @@ public interface IAzureApi
 
     /// <summary>GETs a single ARM resource URL and returns the JSON body.</summary>
     Task<JsonElement> GetArmAsync(string url, string? tenantId, CancellationToken ct = default);
+
+    /// <summary>Runs a read-only ARM query operation, such as Cost Management Query.</summary>
+    Task<JsonElement> PostArmQueryAsync(string url, object body, string? tenantId, CancellationToken ct = default);
 }

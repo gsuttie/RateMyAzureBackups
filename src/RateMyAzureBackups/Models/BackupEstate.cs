@@ -73,6 +73,7 @@ public sealed class BackupVaultInfo
 
     /// <summary>"GeoRedundant", "ZoneRedundant", "LocallyRedundant" or empty when unknown.</summary>
     public string StorageRedundancy { get; set; } = string.Empty;
+    public List<string> StorageConfigurations { get; set; } = new();
     public bool? CrossRegionRestore { get; set; }
 
     /// <summary>"Enabled", "AlwaysOn", "Disabled" or empty when unknown.</summary>
@@ -228,6 +229,11 @@ public sealed class BackupScanResult
     public List<BackupRating> Ratings { get; set; } = new();
     public List<string> Warnings { get; set; } = new();
     public List<string> SubscriptionIds { get; set; } = new();
+    public List<ResourceInventoryInfo> ResourceInventory { get; set; } = new();
+    public List<string> InventorySubscriptionIds { get; set; } = new();
+    public List<BackupCostLine> Costs { get; set; } = new();
+    public List<BackupCostCoverage> CostCoverage { get; set; } = new();
+    public bool IsSampleData { get; set; }
     public DateTime CompletedAt { get; set; } = DateTime.Now;
 
     public int VaultCount => Vaults.Count;
@@ -244,5 +250,10 @@ public sealed class BackupScanResult
         Ratings.AddRange(other.Ratings);
         Warnings.AddRange(other.Warnings);
         SubscriptionIds.AddRange(other.SubscriptionIds);
+        ResourceInventory.AddRange(other.ResourceInventory);
+        InventorySubscriptionIds.AddRange(other.InventorySubscriptionIds);
+        Costs.AddRange(other.Costs);
+        CostCoverage.AddRange(other.CostCoverage);
+        IsSampleData |= other.IsSampleData;
     }
 }

@@ -13,6 +13,31 @@ Each flow is three steps: **Scope** (tenant and subscriptions) → **Grades** (A
 
 It is the sibling of [RateMyWAF](https://github.com/gsuttie/ratemywaf): same layout, theme, wizard and report pipeline, applied to Azure Backup.
 
+## Assessment coverage
+
+Both flows include an assessment panel and export the following in **both report versions, as Word, Markdown or an HTML preview**:
+
+The report window offers **Download .docx** and **Download .md** for both Summary and Detailed findings. Markdown uses GitHub-flavored headings, tables and lists; open the UTF-8 `.md` file and paste its contents into a GitHub issue.
+
+Both report versions also include full vault security and diagnostics (including workspace IDs), complete policy settings and matched item IDs, protected-item source/policy mappings and errors, rating evidence, finding remediation, and all available job-analysis details. Reports are not restricted by on-screen inventory filters or pagination.
+
+| Area | Coverage |
+|---|---|
+| Resource inventory | All resources returned by the Azure Resource Graph `Resources` table, plus discovered backup sources. Shows source IDs, type, subscription, group, location, source SKU, environment and linked backup evidence. Missing vault protection and unassessed resources are explicitly distinguished. |
+| Backup locations and storage | Primary vault region, redundancy, datastore configuration when returned, Cross Region Restore, and existing security/diagnostic settings. Operational snapshots, actual recovery-point tiers and secondary locations need workload-specific verification. |
+| Schedules and retention | Existing per-workload policy inventory, schedule, retention, instant restore and database log settings. |
+| Current costs | Actual pre-tax Backup-category charges for the last 30 complete UTC days, grouped by billed resource and meter subcategory. Query availability is recorded per subscription; currency subtotals are never mixed. |
+| Best-practice gaps | Existing findings with remediation guidance, plus per-resource missing requirements and configured cadence/retention gaps. Links to Microsoft's backup guidance and support matrix. |
+| Recommended policies | Advisory Development, Test, Production and Critical baselines, adapted to the resource/workload. Environment comes from `environment`/`env` tags or a manual override, never guessed from names. Unknown environments require owner confirmation. Proposed retention periods are not Microsoft mandates. |
+| Cost optimisation | Retained data on stopped items, long-term retention/tiering review, policy hygiene and environment right-sizing. No unsupported savings estimates or automatic changes. |
+| Recovery requirements | Per-resource owner, RPO/RTO in hours, required retention, restore-test evidence and dependency/compliance notes. Requirements stay in the current session: export before reload or rescan. |
+
+**Coverage limits:** each flow correlates only its own vault product within the selected subscriptions. A linked item may cover only a share or guest database, not an entire resource. Missing vault evidence is not proof that native, cross-scope or third-party backups are absent. Resource Graph does not enumerate every data-plane object. The app explicitly reports unknown/unassessed coverage rather than claiming complete tenant protection. Achieved RPO/RTO and restore success require recovery testing.
+
+**Cost limits:** costs are subscription-wide across both vault products, not a per-flow or per-item allocation; do not add the same subscription's totals across flows. Snapshot, storage, network, restore, native-service and third-party charges can be billed outside the Backup meter category. Billing delays, permissions and unavailable data are shown explicitly, never replaced with zero. Sample mode uses labelled illustrative charges.
+
+Billing queries are serialized and paced at least one second apart per app instance. Identical successful requests (tenant, subscription/query URL and request body, including date range and pagination) are cached in memory for up to four hours across both flows. HTTP 429 responses respect the longest Azure Cost Management or standard `Retry-After` header, with exponential backoff and jitter when no valid delay is supplied. At most four attempts and two minutes of scheduled waiting are allowed per request; longer cooldowns are retained without blocking the rest of the assessment. Errors are not cached as cost data, and throttling is distinguished from billing permission failures.
+
 ## Scoring model
 
 100 points across six weighted categories, mapped to a letter, with hard caps. The model is the same for both vault products.
@@ -53,11 +78,11 @@ No Azure access? Click **Try with sample data** on the home page. Both flows the
 
 The app uses `AzureCliCredential` by default. To run it somewhere without the Azure CLI (App Service, a container with a managed identity), set `Azure:Credential` to `Default` in `appsettings.json` or as the environment variable `Azure__Credential=Default` to use `DefaultAzureCredential`.
 
-The credential needs **Reader** on the subscriptions. Backup Reader is not required: everything comes from Azure Resource Graph and ARM `GET` calls.
+The credential needs **Reader** on the subscriptions. Backup Reader is not required. Cost queries additionally require access to billing data (for example **Cost Management Reader**, subject to billing-account policies). A cost query failure leaves the rest of the assessment available with an explicit warning.
 
 ### What the scan reads
 
-Everything is read-only, through Azure Resource Graph and ARM `GET` calls:
+Everything is read-only, through Azure Resource Graph, ARM `GET` calls and the Cost Management Query `POST` operation (which does not modify resources):
 
 - Recovery Services vaults and Backup vaults: storage redundancy, Cross Region Restore, soft delete, immutability, multi-user authorization, public network access, built-in job-failure alerts (with ARM fallbacks to `backupstorageconfig` and `backupconfig` for vaults whose Resource Graph shape predates these settings)
 - Protected items and backup instances (`RecoveryServicesResources` table): protection state, last backup status and time, source resource, policy
@@ -65,6 +90,8 @@ Everything is read-only, through Azure Resource Graph and ARM `GET` calls:
 - Backup jobs (`RecoveryServicesResources` table, roughly the last month) for the Jobs step and for the last-backup status of Backup vault instances
 - Diagnostic settings on every vault (which backup log categories are enabled and where they go)
 - Every virtual machine in the scanned subscriptions, to list the ones no Recovery Services vault protects
+- All Resource Graph resources, including environment tags and source SKUs, to document inventory and unassessed coverage in both flows
+- Cost Management actual charges in the Backup meter category, with pagination and per-subscription query availability
 
 RateMyAzureBackups never modifies a resource. The fix scripts it generates are PowerShell (`Az.RecoveryServices` / `Az.DataProtection`) you review and run yourself.
 

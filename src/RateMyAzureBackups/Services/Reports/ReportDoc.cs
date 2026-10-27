@@ -2,7 +2,7 @@ namespace RateMyAzureBackups.Services.Reports;
 
 /// <summary>
 /// Renderer-agnostic report content. The same document model drives the on-screen HTML preview and the
-/// downloadable Word file, so the preview always matches what the customer receives.
+/// downloadable Word and Markdown files, so each format contains the same report content.
 /// </summary>
 public sealed class ReportDoc
 {

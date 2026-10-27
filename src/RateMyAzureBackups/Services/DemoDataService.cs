@@ -42,8 +42,50 @@ public static class DemoDataService
         result.Vaults = result.Vaults.Where(v => subs.Contains(v.SubscriptionId)).ToList();
         result.Policies = result.Policies.Where(p => subs.Contains(p.SubscriptionId)).ToList();
         result.UnprotectedResources = result.UnprotectedResources.Where(r => subs.Contains(r.SubscriptionId)).ToList();
+        PopulateAssessment(result);
         BackupDiscoveryService.Finalize(result, Now);
         return result;
+    }
+
+    private static void PopulateAssessment(BackupScanResult result)
+    {
+        result.IsSampleData = true;
+        result.InventorySubscriptionIds = result.SubscriptionIds.ToList();
+        BackupDiscoveryService.AddBackupSourcesToInventory(result);
+        foreach (var resource in result.ResourceInventory)
+            resource.Environment = resource.SubscriptionId == SubProd ? "Production" : "Test";
+        foreach (var resource in result.UnprotectedResources)
+            result.ResourceInventory.Add(new ResourceInventoryInfo
+            {
+                Id = resource.Id, Name = resource.Name, ResourceGroup = resource.ResourceGroup,
+                SubscriptionId = resource.SubscriptionId, Location = resource.Location,
+                ResourceType = "microsoft.compute/virtualmachines", Protection = "No vault protection found",
+                Environment = "Development"
+            });
+        foreach (var sub in result.SubscriptionIds)
+        {
+            result.ResourceInventory.Add(new ResourceInventoryInfo
+            {
+                Id = $"{Rg(sub, "rg-native")}/Microsoft.Sql/servers/sql-native/databases/app",
+                Name = "app-native-db", ResourceGroup = "rg-native", SubscriptionId = sub, Location = "westeurope",
+                ResourceType = "microsoft.sql/servers/databases", Environment = "Production", Protection = "No vault protection found"
+            });
+            result.CostCoverage.Add(new BackupCostCoverage
+            {
+                SubscriptionId = sub, Available = true, FromUtc = Now.UtcDateTime.Date.AddDays(-30),
+                ToUtc = Now.UtcDateTime.Date.AddTicks(-1)
+            });
+            result.Costs.Add(new BackupCostLine
+            {
+                SubscriptionId = sub, ResourceId = result.Vaults.FirstOrDefault(v => v.SubscriptionId == sub)?.Id ?? "",
+                Meter = "Protected instances (sample)", Currency = "GBP", Amount = sub == SubProd ? 184.25m : 42.80m
+            });
+            result.Costs.Add(new BackupCostLine
+            {
+                SubscriptionId = sub, ResourceId = result.Vaults.FirstOrDefault(v => v.SubscriptionId == sub)?.Id ?? "",
+                Meter = "Backup storage (sample)", Currency = "GBP", Amount = sub == SubProd ? 97.62m : 18.35m
+            });
+        }
     }
 
     // ── Recovery Services vaults ─────────────────────────────────────────────
