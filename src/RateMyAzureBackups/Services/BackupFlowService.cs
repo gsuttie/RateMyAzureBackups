@@ -137,7 +137,7 @@ public sealed class BackupFlowService
             TenantName = tenantName,
             ReportAuthor = Environment.UserName,
             ScanDate = fs.Scan?.CompletedAt ?? DateTime.Now,
-            SubscriptionLines = subs.Select(s => $"{s.DisplayName} ({s.SubscriptionId})").ToList(),
+            Subscriptions = subs,
             Scan = fs.Scan,
             JobAnalysis = fs.JobAnalysis
         };

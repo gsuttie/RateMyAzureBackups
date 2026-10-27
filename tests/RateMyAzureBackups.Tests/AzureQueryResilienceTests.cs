@@ -185,8 +185,8 @@ public class AzureQueryResilienceTests
         Assert.Contains("Azure throttled", warning);
         Assert.DoesNotContain("Reader access", warning);
         var context = new BackupReportContext { Scan = scan, Flow = BackupFlowKind.BackupVault };
-        Assert.Contains("429", BackupReportService.SummaryHtml(context));
-        Assert.Contains("429", BackupReportService.FindingsMarkdown(context));
+        Assert.Contains("429", BackupReportService.ExtensiveHtml(context));
+        Assert.Contains("429", BackupReportService.ExtensiveMarkdown(context));
     }
 
     private static AzureApi Api(Factory factory, TimeProvider clock) => new(new Credential(), factory, NullLogger<AzureApi>.Instance, clock);

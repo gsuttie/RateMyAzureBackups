@@ -211,9 +211,9 @@ public class ComponentTests : BunitContext
             await ScanAsync(flow);
             var cut = Render<ReportModal>(p => p.Add(x => x.Flow, flow));
             await cut.InvokeAsync(() => cut.Instance.Open(false));
-            foreach (var findings in new[] { false, true })
+            foreach (var reportType in Enum.GetValues<BackupReportType>())
             {
-                if (findings) cut.FindAll(".report-tabs button")[1].Click();
+                cut.FindAll(".report-tabs button")[(int)reportType].Click();
                 var buttons = cut.FindAll(".report-downloads button");
                 Assert.Equal(2, buttons.Count);
                 Assert.Contains("Copy Markdown", buttons[0].TextContent);
@@ -224,12 +224,19 @@ public class ComponentTests : BunitContext
 
                 await buttons[0].ClickAsync(new());
                 var copy = JSInterop.Invocations.Last(i => i.Identifier == "rmab.copy");
-                Assert.Equal(findings ? BackupReportService.FindingsMarkdown(ctx) : BackupReportService.SummaryMarkdown(ctx), copy.Arguments[0]);
+                var expectedMarkdown = reportType switch
+                {
+                    BackupReportType.Summary => BackupReportService.SummaryMarkdown(ctx),
+                    BackupReportType.Detailed => BackupReportService.DetailedMarkdown(ctx),
+                    BackupReportType.Extensive => BackupReportService.ExtensiveMarkdown(ctx),
+                    _ => throw new ArgumentOutOfRangeException(nameof(reportType))
+                };
+                Assert.Equal(expectedMarkdown, copy.Arguments[0]);
                 Assert.Contains("Copied", cut.FindAll(".report-downloads button")[0].TextContent);
 
                 await cut.FindAll(".report-downloads button")[1].ClickAsync(new());
                 var call = JSInterop.Invocations.Last(i => i.Identifier == "rmab.download");
-                Assert.Equal(BackupReportService.FileName(ctx, findings), call.Arguments[0]);
+                Assert.Equal(BackupReportService.FileName(ctx, reportType), call.Arguments[0]);
                 var bytes = Convert.FromBase64String(Assert.IsType<string>(call.Arguments[1]));
                 Assert.Equal("application/vnd.openxmlformats-officedocument.wordprocessingml.document", call.Arguments[2]);
                 Assert.Equal((byte)'P', bytes[0]);

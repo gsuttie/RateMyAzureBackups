@@ -63,8 +63,9 @@ else if (Result is not null)
         <span class="muted small"><b>@Result.TargetName</b> · @Result.TimeRangeLabel · @Result.SuccessRate% of finished jobs succeeded @if (Flows.State.DemoMode) { <span class="pill pill-demo sm">sample</span> }</span>
         <span class="results-actions">
             <button class="btn btn-ghost btn-sm" @onclick="() => _changesOpen = true"><Icon Name="refresh" Size="14" /> Changes vs previous period <span class="count">@Result.Changes.Count</span></button>
-            <button class="btn btn-ghost btn-sm" @onclick="() => _report.Open(false)"><Icon Name="doc" Size="14" /> Summary report</button>
-            <button class="btn btn-ghost btn-sm" @onclick="() => _report.Open(true)"><Icon Name="doc" Size="14" /> Detailed report</button>
+            <button class="btn btn-ghost btn-sm" @onclick="() => _report.Open(BackupReportType.Summary)"><Icon Name="doc" Size="14" /> Summary report</button>
+            <button class="btn btn-ghost btn-sm" @onclick="() => _report.Open(BackupReportType.Detailed)"><Icon Name="doc" Size="14" /> Detailed report</button>
+            <button class="btn btn-ghost btn-sm" @onclick="() => _report.Open(BackupReportType.Extensive)"><Icon Name="doc" Size="14" /> Extensive report</button>
         </span>
     </div>
 

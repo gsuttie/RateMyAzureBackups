@@ -14,8 +14,9 @@
     </span>
     <span class="results-actions">
         <a class="btn btn-ghost btn-sm" href="/@Flow.Route()"><Icon Name="refresh" Size="14" /> Rescan</a>
-        <button class="btn btn-ghost btn-sm" @onclick="() => _report.Open(false)"><Icon Name="doc" Size="14" /> Summary report</button>
-        <button class="btn btn-ghost btn-sm" @onclick="() => _report.Open(true)"><Icon Name="doc" Size="14" /> Detailed report</button>
+        <button class="btn btn-ghost btn-sm" @onclick="() => _report.Open(BackupReportType.Summary)"><Icon Name="doc" Size="14" /> Summary report</button>
+        <button class="btn btn-ghost btn-sm" @onclick="() => _report.Open(BackupReportType.Detailed)"><Icon Name="doc" Size="14" /> Detailed report</button>
+        <button class="btn btn-ghost btn-sm" @onclick="() => _report.Open(BackupReportType.Extensive)"><Icon Name="doc" Size="14" /> Extensive report</button>
         @if (HasJobTargets)
         {
             <a class="btn btn-primary btn-sm" href="/@Flow.Route()/jobs"><Icon Name="jobs" Size="14" /> Analyse jobs</a>

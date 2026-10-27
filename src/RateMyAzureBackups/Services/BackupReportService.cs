@@ -11,165 +11,237 @@ public sealed class BackupReportContext
     public string TenantName { get; init; } = "";
     public string ReportAuthor { get; init; } = "";
     public DateTime ScanDate { get; init; } = DateTime.Now;
-    public List<string> SubscriptionLines { get; init; } = new();
+    public List<SubscriptionInfo> Subscriptions { get; init; } = new();
     public BackupScanResult? Scan { get; init; }
     public BackupJobAnalysis? JobAnalysis { get; init; }
 }
 
-/// <summary>Builds the summary and detailed-findings reports (as a ReportDoc) for one flow.</summary>
+public enum BackupReportType { Summary, Detailed, Extensive }
+
+/// <summary>Builds concise customer reports and an extensive findings report for one flow.</summary>
 public static class BackupReportService
 {
     public static byte[] SummaryDocx(BackupReportContext ctx) => DocxReportRenderer.Render(BuildSummary(ctx));
-    public static byte[] FindingsDocx(BackupReportContext ctx) => DocxReportRenderer.Render(BuildFindings(ctx));
+    public static byte[] DetailedDocx(BackupReportContext ctx) => DocxReportRenderer.Render(BuildDetailed(ctx));
+    public static byte[] ExtensiveDocx(BackupReportContext ctx) => DocxReportRenderer.Render(BuildFindings(ctx));
     public static string SummaryHtml(BackupReportContext ctx) => HtmlReportRenderer.Render(BuildSummary(ctx));
-    public static string FindingsHtml(BackupReportContext ctx) => HtmlReportRenderer.Render(BuildFindings(ctx));
+    public static string DetailedHtml(BackupReportContext ctx) => HtmlReportRenderer.Render(BuildDetailed(ctx));
+    public static string ExtensiveHtml(BackupReportContext ctx) => HtmlReportRenderer.Render(BuildFindings(ctx));
     public static string SummaryMarkdown(BackupReportContext ctx) => MarkdownReportRenderer.Render(BuildSummary(ctx));
-    public static string FindingsMarkdown(BackupReportContext ctx) => MarkdownReportRenderer.Render(BuildFindings(ctx));
+    public static string DetailedMarkdown(BackupReportContext ctx) => MarkdownReportRenderer.Render(BuildDetailed(ctx));
+    public static string ExtensiveMarkdown(BackupReportContext ctx) => MarkdownReportRenderer.Render(BuildFindings(ctx));
+
+    public static byte[] FindingsDocx(BackupReportContext ctx) => ExtensiveDocx(ctx);
+    public static string FindingsHtml(BackupReportContext ctx) => ExtensiveHtml(ctx);
+    public static string FindingsMarkdown(BackupReportContext ctx) => ExtensiveMarkdown(ctx);
 
     public static string FileName(BackupReportContext ctx, bool findings, bool markdown = false)
+        => FileName(ctx, findings ? BackupReportType.Extensive : BackupReportType.Summary, markdown);
+
+    public static string FileName(BackupReportContext ctx, BackupReportType reportType, bool markdown = false)
     {
         var scope = ctx.Flow == BackupFlowKind.RecoveryServices ? "RecoveryServices" : "BackupVault";
         var customer = string.Concat((ctx.CustomerName ?? "").Where(c => char.IsLetterOrDigit(c) || c is '-' or '_'));
         if (string.IsNullOrEmpty(customer)) customer = "Backup";
-        return $"{customer}-{scope}-Backup-{(findings ? "Findings" : "Summary")}-{ctx.ScanDate:yyyyMMdd}.{(markdown ? "md" : "docx")}";
+        return $"{customer}-{scope}-Backup-{reportType}-{ctx.ScanDate:yyyyMMdd}.{(markdown ? "md" : "docx")}";
     }
 
     // ── Summary report ───────────────────────────────────────────────────────
 
     public static ReportDoc BuildSummary(BackupReportContext ctx)
     {
-        var product = ctx.Flow.Label();
         var scan = ctx.Scan;
-        var ja = ctx.JobAnalysis;
-        var vaults = scan?.Vaults ?? [];
-        var policies = scan?.Policies ?? [];
         var findings = scan?.Findings ?? [];
-        var items = vaults.SelectMany(v => v.Items).ToList();
+        var vaults = scan?.Vaults ?? [];
+        var items = scan?.AllItems.ToList() ?? [];
+        var ratings = scan?.Ratings ?? [];
+        var orderedFindings = findings
+            .OrderBy(f => BackupFindingsBuilder.SeverityOrder(f.Severity))
+            .ThenBy(f => f.ResourceName, StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToList();
 
-        int broken = items.Count(i => !i.IsActive);
-        int failed = items.Count(i => i.IsActive && i.LastBackupSucceeded == false);
-        int lrs = vaults.Count(v => v.IsLocallyRedundant);
-        int softDeleteOff = vaults.Count(v => v.SoftDeleteEnabled == false);
-        int noImmutability = vaults.Count(v => !v.ImmutabilityLocked);
-        int unprotectedVms = scan?.UnprotectedResources.Count ?? 0;
-
-        var doc = new ReportDoc { Title = $"{product}s — Backup Summary Report" };
-
-        doc.H1("1. Document information");
-        DocInfo(doc, ctx);
-
-        doc.H1("2. Executive summary");
+        var doc = new ReportDoc { Title = $"{ctx.Flow.Label()}s — Backup Summary Report" };
+        SubscriptionSection(doc, ctx);
+        doc.H1("Executive overview");
         if (scan is null)
         {
-            doc.P("No scan data was available when this report was generated — run a scan to populate the estate sections.");
+            doc.P("No scan data available.");
         }
         else
         {
             var high = findings.Count(f => f.Severity == "High");
             var medium = findings.Count(f => f.Severity == "Medium");
             var info = findings.Count(f => f.Severity == "Info");
-            doc.P($"The scan covered {ctx.SubscriptionLines.Count} subscription(s) and found {vaults.Count} {ctx.Flow.PluralLabel()} " +
-                  $"protecting {items.Count} {ctx.Flow.ItemPluralLabel()} with {policies.Count} backup polic{(policies.Count == 1 ? "y" : "ies")}. " +
-                  $"It produced {findings.Count} finding(s): {high} High, {medium} Medium and {info} Info.");
-            var concerns = new List<string>();
-            if (unprotectedVms > 0) concerns.Add($"{unprotectedVms} virtual machine(s) in scope are not backed up at all");
-            if (broken > 0) concerns.Add($"{broken} {ctx.Flow.ItemPluralLabel()} have protection stopped or in error");
-            if (failed > 0) concerns.Add($"{failed} {ctx.Flow.ItemPluralLabel()} failed their most recent backup");
-            if (lrs > 0) concerns.Add($"{lrs} vault(s) use locally redundant storage");
-            if (softDeleteOff > 0) concerns.Add($"{softDeleteOff} vault(s) have soft delete disabled");
-            if (concerns.Count > 0) doc.P($"The most significant gaps: {string.Join("; ", concerns)}.");
+            var subscriptionCount = ReportSubscriptions(ctx).Count;
+            doc.P($"This read-only assessment covers {subscriptionCount} subscription(s), {vaults.Count} {ctx.Flow.PluralLabel()}, " +
+                  $"{items.Count} protected workload(s) and {scan.Policies.Count} backup polic{(scan.Policies.Count == 1 ? "y" : "ies")}. " +
+                  $"It identified {findings.Count} issue(s): {high} high, {medium} medium and {info} informational.");
+
+            if (ratings.Count > 0)
+            {
+                var weakest = BackupRatingService.Worst(ratings)!;
+                var average = (int)Math.Round(ratings.Average(r => r.Score));
+                doc.Grade(weakest.Grade, weakest.GradeLabel,
+                    ratings.Count == 1
+                        ? $"{weakest.TargetName} scores {weakest.Score}/100."
+                        : $"The overall grade reflects the weakest-rated vault, {weakest.TargetName} ({weakest.Score}/100); average score across {ratings.Count} vault(s) is {average}/100.");
+            }
+
+            var overviewRows = new List<string[]>
+            {
+                new[] { "Vaults in scope", vaults.Count.ToString() },
+                new[] { "Protected workloads", items.Count.ToString() },
+                new[] { "Protection stopped or in error", items.Count(i => !i.IsActive).ToString() },
+                new[] { "Most recent backup failed", items.Count(i => i.IsActive && i.LastBackupSucceeded == false).ToString() },
+                new[] { "Backup policies", scan.Policies.Count.ToString() },
+            };
+            if (ctx.Flow == BackupFlowKind.RecoveryServices)
+                overviewRows.Insert(2, new[] { "Virtual machines without backup", $"{scan.UnprotectedResources.Count} of {scan.VirtualMachineCount}" });
+            doc.Table(["Coverage check", "Result"], overviewRows, "No scan data available.");
+
+            doc.H2("Priority findings and next steps");
+            doc.P($"Showing the {orderedFindings.Count} highest-priority finding(s) of {findings.Count}; start with High severity items.");
+            doc.Table(["#", "Priority", "Area", "Finding", "Suggested next step"],
+                orderedFindings.Select((f, index) => new[]
+                {
+                    (index + 1).ToString(), f.Severity, f.ResourceName, f.Message, SummaryAction(f.Category)
+                }).ToList(),
+                "No findings — the backup estate matches the checks performed.",
+                orderedFindings.Select(f => new string?[] { null, SeverityColor(f.Severity), null, null, null }).ToList());
         }
-        if (ja is { JobsQueryable: true })
-            doc.P($"Backup jobs for {product} '{ja.TargetName}' were analysed over the {ja.TimeRangeLabel}: " +
-                  $"{ja.TotalJobs} job(s) across {ja.DistinctItems} item(s) — {ja.CompletedCount} completed, {ja.WarningCount} with warnings, " +
-                  $"{ja.FailedCount} failed, {ja.InProgressCount} in progress ({ja.SuccessRate}% success). {Classified(ja)}");
-        doc.Note("This report is the output of a read-only scan; no changes were made to any Azure resource.");
-
-        doc.H1($"3. {product} backup rating");
-        RatingSection(doc, ctx);
-
-        doc.H1("4. Backup estate overview");
-        var rows = new List<string[]>
-        {
-            new[] { ctx.Flow.PluralLabel(), Count(scan, vaults.Count) },
-            new[] { Capitalize(ctx.Flow.ItemPluralLabel()), Count(scan, items.Count) },
-            new[] { "Items actively protected", Count(scan, items.Count(i => i.IsActive)) },
-            new[] { "Items with protection stopped or in error", Count(scan, broken) },
-            new[] { "Items whose last backup failed", Count(scan, failed) },
-            new[] { "Backup policies", Count(scan, policies.Count) },
-            new[] { "Vaults on locally redundant storage", Count(scan, lrs) },
-            new[] { "Vaults without soft delete", Count(scan, softDeleteOff) },
-            new[] { "Vaults without locked immutability", Count(scan, noImmutability) },
-            new[] { "Total findings", Count(scan, findings.Count) },
-        };
-        if (ctx.Flow == BackupFlowKind.RecoveryServices)
-            rows.Insert(3, new[] { "Virtual machines without backup", scan is null ? "—" : $"{unprotectedVms} of {scan.VirtualMachineCount}" });
-        doc.Table(["Metric", "Value"], rows, "No scan data available.");
-
-        doc.H1("5. Findings summary");
-        var orderedFindings = findings.OrderBy(f => BackupFindingsBuilder.SeverityOrder(f.Severity)).ToList();
-        doc.Table(["Severity", "Category", "Finding", "Resource / scope", "Remediation"],
-            orderedFindings.Select(f => new[] { f.Severity, f.Category, f.Message,
-                $"{f.ResourceName}\n{f.ResourceId}\nSubscription: {f.SubscriptionId}", f.Fix }).ToList(),
-            scan is null ? "No scan data available." : "No findings — the backup estate matches the checks performed.",
-            orderedFindings.Select(f => new string?[] { SeverityColor(f.Severity), null, null, null, null }).ToList());
-
-        doc.H1("6. Vault configuration");
-        doc.Table(["Vault", "Redundancy", "Cross-region restore", "Soft delete", "Immutability", "MUA", "Job alerts"],
-            vaults.OrderBy(v => v.Name, StringComparer.OrdinalIgnoreCase).Select(v => new[]
-            {
-                v.Name, v.RedundancyLabel, Flag(v.CrossRegionRestore), Fallback(v.SoftDeleteState, "Unknown"),
-                Fallback(v.ImmutabilityState, "Unknown"), Flag(v.MultiUserAuthorization), Flag(v.AlertsForAllJobFailures)
-            }).ToList(),
-            scan is null ? "No scan data available." : $"No {ctx.Flow.PluralLabel()} in scope.");
-
-        doc.H1("7. Policy compliance");
-        doc.Table(["Policy", "Vault", "Workload", "Schedule", "Retention", "Items"],
-            policies.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).Select(p => new[]
-            {
-                p.Name, Azure.Json.LastSegment(p.VaultId), p.WorkloadType, Fallback(p.ScheduleSummary, "Unknown"), p.RetentionSummary, p.ProtectedItemCount.ToString()
-            }).ToList(),
-            scan is null ? "No scan data available." : "No backup policies found.");
-        PolicyDetails(doc, scan);
-
-        doc.H1("8. Recommendations");
-        var recs = new List<string>();
-        foreach (var f in findings.Where(f => f.Severity == "High").Take(5))
-            recs.Add($"{f.Message} ({f.ResourceName})");
-        if (unprotectedVms > 0)
-            recs.Add($"Enable backup on the {unprotectedVms} unprotected virtual machine(s).");
-        if (broken > 0)
-            recs.Add($"Resume or repair protection for the {broken} item(s) that are stopped or in error so they get new recovery points.");
-        if (lrs > 0)
-            recs.Add($"Plan a move to geo-redundant vaults for the {lrs} vault(s) on locally redundant storage.");
-        if (softDeleteOff > 0)
-            recs.Add($"Enable soft delete on the {softDeleteOff} vault(s) where it is off.");
-        if (ja is not null)
-            recs.AddRange(ja.Activities
-                .OrderBy(r => BackupJobAnalysisService.ClassificationOrder(r.Classification))
-                .SelectMany(r => r.Recommendations).Distinct().Take(5));
-        if (recs.Count == 0)
-            recs.Add("No immediate actions required — continue periodic scans and job reviews to maintain the current posture.");
-        doc.Bullets(recs.Distinct().Take(10));
-        doc.Note("All recommendations are advisory. RateMyAzureBackups does not modify vaults, policies, protected items or diagnostic settings.");
-
-        doc.H1("9. Protected items");
-        ProtectedItemDetails(doc, scan, ctx.Flow);
-        doc.H1("10. Backup job analysis");
-        JobAnalysisDetails(doc, ctx, "10");
-        AssessmentSections(doc, scan, 11);
         return doc;
     }
 
-    // ── Detailed findings report ─────────────────────────────────────────────
+    // ── Detailed quick-reference report ──────────────────────────────────────
+
+    public static ReportDoc BuildDetailed(BackupReportContext ctx)
+    {
+        var scan = ctx.Scan;
+        var product = ctx.Flow.Label();
+        var items = scan?.AllItems.ToList() ?? [];
+        var findings = scan?.Findings ?? [];
+        var doc = new ReportDoc { Title = $"{ctx.Flow.Label()}s — Detailed Backup Overview" };
+
+        SubscriptionSection(doc, ctx);
+        doc.H1("1. Assessment overview");
+        DocInfo(doc, ctx);
+        if (scan is null)
+        {
+            doc.P("No scan data available.");
+            return doc;
+        }
+
+        doc.P($"Assessment covers {ReportSubscriptions(ctx).Count} subscription(s), {scan.Vaults.Count} {ctx.Flow.PluralLabel()}, " +
+              $"{items.Count} protected workload(s), {scan.Policies.Count} polic{(scan.Policies.Count == 1 ? "y" : "ies")} " +
+              $"and {findings.Count} finding(s).");
+        AddRatingOverview(doc, scan, product);
+
+        doc.H1("2. Priority findings");
+        var prioritized = findings.OrderBy(f => BackupFindingsBuilder.SeverityOrder(f.Severity))
+            .ThenBy(f => f.ResourceName, StringComparer.OrdinalIgnoreCase).Take(10).ToList();
+        doc.Table(["Priority", "Resource", "Finding", "Next step"],
+            prioritized.Select(f => new[] { f.Severity, f.ResourceName, f.Message, SummaryAction(f.Category) }).ToList(),
+            "No findings — the backup estate matches the checks performed.",
+            prioritized.Select(f => new string?[] { SeverityColor(f.Severity), null, null, null }).ToList());
+
+        doc.H1("3. Backup policy inventory");
+        doc.Table(["Policy", "Workload", "Schedule", "Retention", "Protected items"],
+            scan.Policies.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+                .Take(10)
+                .Select(p => new[] { p.Name, p.WorkloadType, Fallback(p.ScheduleSummary, "Unknown"), p.RetentionSummary, p.ProtectedItemCount.ToString() })
+                .ToList(), "No backup policies in scope.");
+        if (scan.Policies.Count > 10) doc.P($"Showing 10 of {scan.Policies.Count} policies; see the Extensive report for the full inventory.");
+
+        doc.H1("4. Protected item coverage");
+        var vaultRows = scan.Vaults.OrderBy(v => v.Name, StringComparer.OrdinalIgnoreCase).Take(10).Select(v => new[]
+        {
+            v.Name, v.Items.Count.ToString(), v.Items.Count(i => i.IsActive).ToString(),
+            v.Items.Count(i => !i.IsActive).ToString(),
+            v.Items.Count(i => i.IsActive && i.LastBackupSucceeded == false).ToString()
+        }).ToList();
+        doc.Table(["Vault", "Items", "Active", "Stopped / error", "Last backup failed"], vaultRows,
+            $"No {ctx.Flow.PluralLabel()} in scope.");
+        if (scan.Vaults.Count > 10) doc.P($"Showing 10 of {scan.Vaults.Count} vaults; see the Extensive report for item-level detail.");
+        if (ctx.Flow == BackupFlowKind.RecoveryServices)
+            doc.P($"{scan.UnprotectedResources.Count} of {scan.VirtualMachineCount} virtual machines were identified as not protected by a Recovery Services vault in scope.");
+
+        doc.H1("5. Backup job analysis");
+        AddJobOverview(doc, ctx.JobAnalysis);
+
+        doc.H1("6. Resource inventory and coverage");
+        var inventoryItems = scan.ResourceInventory.Select(r => BackupAssessmentService.ItemsFor(scan, r)).ToList();
+        var inventorySubscriptionCount = scan.InventorySubscriptionIds.Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        var selectedSubscriptionCount = scan.SubscriptionIds.Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        doc.P($"Inventory data was available for {inventorySubscriptionCount} of {selectedSubscriptionCount} selected subscription(s). " +
+              $"{scan.ResourceInventory.Count} resource(s) were reviewed; " +
+              $"{inventoryItems.Count(itemsForResource => itemsForResource.Count > 0)} have linked backup item evidence.");
+        if (scan.IsSampleData) doc.Note("Inventory and cost figures are illustrative sample data, not live Azure data.");
+        doc.Note("Resource inventory and backup associations are limited to the selected subscriptions and this vault flow.");
+
+        doc.H1("7. Backup locations and storage");
+        doc.Table(["Vault", "Region", "Redundancy", "Cross-region restore", "Soft delete", "Immutability"],
+            scan.Vaults.OrderBy(v => v.Name, StringComparer.OrdinalIgnoreCase).Select(v => new[]
+            {
+                v.Name, Fallback(v.Location, "Unknown"), v.RedundancyLabel, Flag(v.CrossRegionRestore),
+                Fallback(v.SoftDeleteState, "Unknown"), Fallback(v.ImmutabilityState, "Unknown")
+            }).ToList(), "No vault configuration available.");
+
+        doc.H1("8. Current backup costs");
+        if (scan.CostCoverage.Count == 0)
+            doc.P("Billing data was not collected; no cost estimate is included.");
+        else
+        {
+            doc.P($"{scan.CostCoverage.Count(c => c.Available)} of {scan.CostCoverage.Count} subscription billing queries completed. " +
+                  "Unavailable billing data is not treated as zero.");
+            foreach (var currency in scan.Costs.GroupBy(c => c.Currency))
+                doc.P($"{currency.Key} {currency.Sum(c => c.Amount):N2} reported subtotal.", bold: true);
+        }
+
+        doc.H1("9. Recommended policies by resource and environment");
+        var recommendations = BackupAssessmentService.Recommendations(scan);
+        doc.Table(["Resource", "Environment", "Workload", "Policy direction"],
+            recommendations.Take(10).Select(r => new[]
+            {
+                r.ResourceName, r.Environment, r.Workload, FirstSentence(r.Policy)
+            }).ToList(), "No inventory resources available for policy recommendations.");
+        if (recommendations.Count > 10) doc.P($"Showing 10 of {recommendations.Count} recommendations; see the Extensive report for full guidance.");
+
+        doc.H1("10. Documented recovery requirements");
+        var documented = scan.ResourceInventory.Where(r => r.Recovery.RpoHours is not null
+            || r.Recovery.RtoHours is not null || r.Recovery.RetentionDays is not null).ToList();
+        doc.Table(["Resource", "Owner", "RPO", "RTO", "Retention"],
+            documented.Take(10).Select(r => new[]
+            {
+                r.Name, Fallback(r.Recovery.Owner, "Not documented"), Hours(r.Recovery.RpoHours),
+                Hours(r.Recovery.RtoHours), r.Recovery.RetentionDays is { } days ? $"{days} days" : "Not documented"
+            }).ToList(), "Recovery targets are not documented in this assessment.");
+        if (documented.Count > 10) doc.P($"Showing 10 of {documented.Count} resources with documented recovery targets.");
+        doc.P("Restore testing is required to validate that recovery targets can be met.");
+
+        doc.H1("11. Cost optimisation opportunities");
+        doc.Bullets(BackupAssessmentService.CostOpportunities(scan).Take(3).Select(FirstSentence));
+        doc.P("No savings are quantified; validate costs and recovery requirements before changing protection.");
+
+        doc.H1("12. Recovery and assessment limitations");
+        doc.Bullets([
+            "A configured backup schedule and successful job do not prove that recovery objectives can be met; test restores.",
+            "Inventory and vault associations cover the selected subscriptions and this backup flow; native, cross-scope and third-party protection may not be represented.",
+            "See the Extensive report for full assessment scope, caveats, evidence and resource-level detail."
+        ]);
+        return doc;
+    }
+
+    // ── Extensive findings report ────────────────────────────────────────────
 
     public static ReportDoc BuildFindings(BackupReportContext ctx)
     {
         var product = ctx.Flow.Label();
         var scan = ctx.Scan;
         var ja = ctx.JobAnalysis;
-        var doc = new ReportDoc { Title = $"{product}s — Detailed Backup Findings" };
+        var doc = new ReportDoc { Title = $"{product}s — Extensive Backup Findings" };
 
+        SubscriptionSection(doc, ctx);
         doc.H1("1. Document information");
         DocInfo(doc, ctx);
 
@@ -351,6 +423,59 @@ public static class BackupReportService
     private static string Timestamp(DateTimeOffset? value) => value is { } t ? $"{t.UtcDateTime:yyyy-MM-dd HH:mm:ss} UTC" : "Unknown";
     private static string Number(int? value, string unit) => value is { } n ? $"{n} {unit}" : "Unknown / not applicable";
 
+    private static void AddRatingOverview(ReportDoc doc, BackupScanResult scan, string product)
+    {
+        if (scan.Ratings.Count == 0)
+        {
+            doc.P($"No {product} ratings available.");
+            return;
+        }
+
+        var worst = BackupRatingService.Worst(scan.Ratings)!;
+        doc.Grade(worst.Grade, worst.GradeLabel,
+            $"Weakest-rated vault: {worst.TargetName} ({worst.Score}/100).");
+        doc.Table([product, "Grade", "Score", "Main improvement"],
+            scan.Ratings.OrderBy(r => r.TargetName, StringComparer.OrdinalIgnoreCase)
+                .Take(10)
+                .Select(r => new[]
+                {
+                    r.TargetName, $"{r.Grade} — {r.GradeLabel}", $"{r.Score}/100",
+                    r.CapReason ?? r.Improvements.FirstOrDefault()?.Action ?? "No priority gap identified."
+                }).ToList(), "No vault ratings available.");
+        if (scan.Ratings.Count > 10) doc.P($"Showing 10 of {scan.Ratings.Count} vault ratings.");
+    }
+
+    private static void AddJobOverview(ReportDoc doc, BackupJobAnalysis? analysis)
+    {
+        if (analysis is null)
+        {
+            doc.P("No job analysis has been run.");
+            return;
+        }
+        if (!analysis.JobsQueryable)
+        {
+            doc.P($"Jobs for '{analysis.TargetName}' could not be queried: {analysis.QueryError}");
+            return;
+        }
+
+        doc.P($"'{analysis.TargetName}' over {analysis.TimeRangeLabel}: {analysis.TotalJobs} job(s) across {analysis.DistinctItems} item(s), " +
+              $"{analysis.CompletedCount} completed, {analysis.WarningCount} with warnings, {analysis.FailedCount} failed " +
+              $"({analysis.SuccessRate}% success).");
+        if (analysis.Activities.Count > 0)
+            doc.Bullets(analysis.Activities.Take(5).Select(activity =>
+                $"{activity.Classification}: {activity.ItemName} — {activity.Failed} failed job(s). " +
+                FirstSentence(Fallback(activity.Recommendations.FirstOrDefault() ?? activity.AzureRecommendation, "Review recent job history."))));
+        if (analysis.Activities.Count > 5) doc.P($"Showing 5 of {analysis.Activities.Count} job activities.");
+        else
+            doc.P("No failed or warning job activity was reported.");
+    }
+
+    private static string FirstSentence(string text)
+    {
+        var end = text.IndexOf(". ", StringComparison.Ordinal);
+        return end < 0 ? text : text[..(end + 1)];
+    }
+
     private static void AssessmentSections(ReportDoc doc, BackupScanResult? scan, int section)
     {
         doc.H1($"{section++}. Resource inventory and coverage");
@@ -444,9 +569,30 @@ public static class BackupReportService
             ["Prepared by", Fallback(ctx.ReportAuthor, "RateMyAzureBackups")],
             ["Scan date", ctx.ScanDate.ToString("yyyy-MM-dd HH:mm")],
             ["Tenant", Fallback(ctx.TenantName, "Unknown")],
-            ["Subscriptions in scope", ctx.SubscriptionLines.Count > 0 ? string.Join("\n", ctx.SubscriptionLines) : "None"],
+            ["Subscriptions in scope", ReportSubscriptions(ctx).Count.ToString()],
             ["Generated by", $"RateMyAzureBackups — {ctx.Flow.Label()} backup assessment (read-only)"],
         ], "", firstColHeader: true);
+
+    private static void SubscriptionSection(ReportDoc doc, BackupReportContext ctx)
+    {
+        doc.H1("Subscriptions in scope");
+        doc.Table(["Subscription name", "Subscription ID"],
+            ReportSubscriptions(ctx).Select(subscription => new[]
+            {
+                Fallback(subscription.DisplayName, "Name not available"),
+                Fallback(subscription.SubscriptionId, "ID not available")
+            }).ToList(),
+            "No subscription information available.");
+    }
+
+    private static List<SubscriptionInfo> ReportSubscriptions(BackupReportContext ctx) =>
+        ctx.Subscriptions.Count > 0
+            ? ctx.Subscriptions
+            : ctx.Scan?.SubscriptionIds.Select(id => new SubscriptionInfo
+            {
+                DisplayName = "Name not available",
+                SubscriptionId = id
+            }).ToList() ?? [];
 
     private static void RatingSection(ReportDoc doc, BackupReportContext ctx)
     {
@@ -500,6 +646,29 @@ public static class BackupReportService
     private static string Count(BackupScanResult? scan, int count) => scan is null ? "—" : count.ToString();
     private static string Flag(bool? value) => value switch { true => "Enabled", false => "Disabled", null => "Unknown" };
     private static string Capitalize(string s) => string.IsNullOrEmpty(s) ? s : char.ToUpperInvariant(s[0]) + s[1..];
+
+    private static string SummaryAction(string category) => category switch
+    {
+        "Empty vault" => "Assign workloads to the vault or retire it if it is no longer needed.",
+        "Protection error" => "Investigate the affected items, resolve the reported cause, then run a backup.",
+        "Protection stopped" => "Resume protection with an appropriate backup policy.",
+        "Backup failed" => "Resolve the latest job failure and confirm a successful backup.",
+        "Stale backup" => "Check the schedule and recent jobs, then create a fresh recovery point.",
+        "Locally redundant" => "Plan a move to geo-redundant storage for regional resilience.",
+        "No cross-region restore" => "Enable Cross Region Restore where regional recovery is required.",
+        "Soft delete disabled" => "Enable soft delete to help recover deleted recovery points.",
+        "Immutability off" => "Enable and lock immutability to protect recovery points from deletion.",
+        "No MUA" => "Enable multi-user authorization for sensitive vault operations.",
+        "Public network access" => "Restrict public access and use private connectivity where possible.",
+        "Job alerts disabled" => "Enable backup job failure alerts and route them to an owner.",
+        "No diagnostics" => "Send backup diagnostics to a Log Analytics workspace.",
+        "Unused policy" => "Assign the policy to workloads or remove it if it is obsolete.",
+        "Weekly schedule" => "Increase backup frequency to meet the required recovery point objective.",
+        "Short retention" => "Extend retention to meet recovery and compliance requirements.",
+        "No long-term retention" => "Add long-term retention if required by recovery or compliance needs.",
+        "Unprotected VM" => "Enable backup using a suitable vault and policy.",
+        _ => "Review this configuration and align it with recovery requirements."
+    };
 
     public static string SeverityColor(string severity) => severity switch
     {

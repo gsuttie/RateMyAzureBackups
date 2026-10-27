@@ -117,32 +117,44 @@ public class ReportTests
             TenantName = "Contoso Ltd (demo)",
             ReportAuthor = "tester",
             ScanDate = new DateTime(2026, 10, 26, 9, 0, 0),
-            SubscriptionLines = ["Contoso Production (1111)", "Contoso Shared Services (2222)"],
+            Subscriptions =
+            [
+                new SubscriptionInfo { DisplayName = "Contoso Production", SubscriptionId = "1111" },
+                new SubscriptionInfo { DisplayName = "Contoso Shared Services", SubscriptionId = "2222" }
+            ],
             Scan = scan,
             JobAnalysis = withJobs ? DemoDataService.JobAnalysis(flow, target.Id, target.Name, "7d") : null
         };
     }
 
     [Fact]
-    public void SummaryHtml_ContainsRatingEstateAndFindings()
+    public void SummaryHtml_ContainsCustomerOverviewAndPriorityActions()
     {
         var html = BackupReportService.SummaryHtml(Context(BackupFlowKind.RecoveryServices, withJobs: true));
         Assert.Contains("Backup Summary Report", html);
-        Assert.Contains("Recovery Services vault backup rating", html);
-        Assert.Contains("rsv-contoso-prod", html);
+        Assert.Contains("Subscription name", html);
+        Assert.Contains("Contoso Production", html);
+        Assert.Contains("1111", html);
+        Assert.Contains("Executive overview", html);
+        Assert.True(html.IndexOf("Subscriptions in scope", StringComparison.Ordinal)
+            < html.IndexOf("Executive overview", StringComparison.Ordinal));
+        Assert.Contains("Priority findings and next steps", html);
+        Assert.Contains("Suggested next step", html);
         Assert.Contains("Virtual machines without backup", html);
-        Assert.Contains("Vault configuration", html);
-        Assert.Contains("Policy compliance", html);
-        Assert.Contains("Recommendations", html);
-        Assert.Contains("Backup jobs for Recovery Services vault", html);
-        Assert.Contains("UNACCEPTABLE", html); // worst vault is the empty dev vault
+        Assert.DoesNotContain("Vault configuration", html);
+        Assert.DoesNotContain("Source resource ID", html);
     }
 
     [Fact]
     public void FindingsHtml_ContainsEverySection()
     {
         var html = BackupReportService.FindingsHtml(Context(BackupFlowKind.BackupVault, withJobs: true));
-        Assert.Contains("Detailed Backup Findings", html);
+        Assert.Contains("Extensive Backup Findings", html);
+        Assert.Contains("Subscription name", html);
+        Assert.Contains("Contoso Shared Services", html);
+        Assert.Contains("2222", html);
+        Assert.True(html.IndexOf("Subscriptions in scope", StringComparison.Ordinal)
+            < html.IndexOf("Document information", StringComparison.Ordinal));
         Assert.Contains("Detailed findings", html);
         Assert.Contains("Backup policy inventory", html);
         Assert.Contains("Protected items", html);
@@ -172,13 +184,16 @@ public class ReportTests
         Assert.NotNull(doc);
         using var reader = new StreamReader(doc!.Open());
         var xml = reader.ReadToEnd();
-        Assert.Contains("Detailed Backup Findings", xml);
+        Assert.Contains("Subscription name", xml);
+        Assert.Contains("Contoso Production", xml);
+        Assert.Contains("1111", xml);
+        Assert.Contains("Extensive Backup Findings", xml);
         Assert.Contains("rsv-contoso-legacy", xml);
         Assert.Contains("Persistent failure", xml);
     }
 
     [Fact]
-    public void BothReportVersions_IncludeFullDetailsInPreviewAndDownload()
+    public void DetailedReport_IncludeFullDetailsInPreviewAndDownload()
     {
         var ctx = Context(BackupFlowKind.RecoveryServices, withJobs: true);
         var scan = ctx.Scan!;
@@ -227,12 +242,10 @@ public class ReportTests
         });
         var contents = new List<string>
         {
-            BackupReportService.SummaryHtml(ctx),
             BackupReportService.FindingsHtml(ctx)
         };
-        foreach (var bytes in new[] { BackupReportService.SummaryDocx(ctx), BackupReportService.FindingsDocx(ctx) })
+        using (var zip = new ZipArchive(new MemoryStream(BackupReportService.FindingsDocx(ctx)), ZipArchiveMode.Read))
         {
-            using var zip = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read);
             using var reader = new StreamReader(zip.GetEntry("word/document.xml")!.Open());
             contents.Add(reader.ReadToEnd());
         }
@@ -255,7 +268,7 @@ public class ReportTests
     }
 
     [Fact]
-    public void BothReports_KeepUnreadSettingsAndFailedJobQueriesExplicit()
+    public void DetailedReport_KeepsUnreadSettingsAndFailedJobQueriesExplicit()
     {
         var ctx = Context(BackupFlowKind.BackupVault, withJobs: true);
         ctx.Scan!.Vaults[0].ImmutabilityState = "";
@@ -263,15 +276,13 @@ public class ReportTests
         ctx.JobAnalysis!.JobsQueryable = false;
         ctx.JobAnalysis.QueryError = "report-job-query-denied";
         ctx.JobAnalysis.Warnings.Add("report-query-warning");
-        foreach (var html in new[] { BackupReportService.SummaryHtml(ctx), BackupReportService.FindingsHtml(ctx) })
-        {
-            Assert.Contains("report-job-query-denied", html);
-            Assert.Contains("report-query-warning", html);
-            Assert.Contains("Unknown", html);
-            Assert.Contains("full vault configuration", html);
-            Assert.Contains("Instant restore snapshots", html);
-            Assert.Contains("Source resource ID", html);
-        }
+        var html = BackupReportService.FindingsHtml(ctx);
+        Assert.Contains("report-job-query-denied", html);
+        Assert.Contains("report-query-warning", html);
+        Assert.Contains("Unknown", html);
+        Assert.Contains("full vault configuration", html);
+        Assert.Contains("Instant restore snapshots", html);
+        Assert.Contains("Source resource ID", html);
     }
 
     [Fact]
@@ -279,6 +290,8 @@ public class ReportTests
     {
         var ctx = Context(BackupFlowKind.RecoveryServices, withJobs: false);
         Assert.Equal("ContosoLtddemo-RecoveryServices-Backup-Summary-20261026.docx", BackupReportService.FileName(ctx, findings: false));
-        Assert.Equal("ContosoLtddemo-BackupVault-Backup-Findings-20261026.docx", BackupReportService.FileName(Context(BackupFlowKind.BackupVault, false), findings: true));
+        Assert.Equal("ContosoLtddemo-BackupVault-Backup-Extensive-20261026.docx", BackupReportService.FileName(Context(BackupFlowKind.BackupVault, false), findings: true));
+        Assert.Equal("ContosoLtddemo-RecoveryServices-Backup-Detailed-20261026.md",
+            BackupReportService.FileName(ctx, BackupReportType.Detailed, markdown: true));
     }
 }

@@ -15,11 +15,11 @@ It is the sibling of [RateMyWAF](https://github.com/gsuttie/ratemywaf): same lay
 
 ## Assessment coverage
 
-Both flows include an assessment panel and export the following in **both report versions, as Word, Markdown or an HTML preview**:
+Both flows include an assessment panel and support three report levels:
 
-The report window offers **Download .docx** and **Download .md** for both Summary and Detailed findings. Markdown uses GitHub-flavored headings, tables and lists; open the UTF-8 `.md` file and paste its contents into a GitHub issue.
+The report window offers **Summary**, **Detailed** quick-reference, and **Extensive** reports, each available as a preview, **.docx**, or **.md**. The Detailed report summarizes each assessment area for customer review; the Extensive report contains the full evidence and remediation detail. Markdown uses GitHub-flavored headings, tables and lists; open the UTF-8 `.md` file and paste its contents into a GitHub issue.
 
-Both report versions also include full vault security and diagnostics (including workspace IDs), complete policy settings and matched item IDs, protected-item source/policy mappings and errors, rating evidence, finding remediation, and all available job-analysis details. Reports are not restricted by on-screen inventory filters or pagination.
+The Extensive report includes full vault security and diagnostics (including workspace IDs), complete policy settings and matched item IDs, protected-item source/policy mappings and errors, rating evidence, finding remediation, and all available job-analysis details. Reports are not restricted by on-screen inventory filters or pagination.
 
 | Area | Coverage |
 |---|---|
@@ -125,7 +125,7 @@ src/RateMyAzureBackups/
     BackupDiscoveryService   Resource Graph / ARM discovery, vault config, unprotected VMs, diagnostics
     BackupFindingsBuilder    Findings with remediation guidance
     BackupJobAnalysisService Job history, failure classification, changes vs previous period
-    BackupReportService      Summary and detailed-findings reports (docx + HTML preview)
+    BackupReportService      Summary, Detailed quick-reference, and Extensive reports (docx + HTML preview)
     FixScriptService         PowerShell remediation scripts per vault product
     DemoDataService          The sample estate
 tests/RateMyAzureBackups.Tests    xUnit + bUnit

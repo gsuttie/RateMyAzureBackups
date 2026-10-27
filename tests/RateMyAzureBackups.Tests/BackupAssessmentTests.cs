@@ -274,30 +274,31 @@ public class BackupAssessmentTests
             RestoreTestEvidence = "2026-10-25: 2h restore (ticket 123)", Notes = "Private endpoint and keys required"
         };
         var ctx = new BackupReportContext { Flow = flow, Scan = scan };
-        foreach (var html in new[] { BackupReportService.SummaryHtml(ctx), BackupReportService.FindingsHtml(ctx) })
+        var summary = BackupReportService.SummaryHtml(ctx);
+        Assert.Contains("Subscriptions in scope", summary);
+        Assert.Contains("Executive overview", summary);
+        Assert.Contains("Priority findings and next steps", summary);
+        var html = BackupReportService.FindingsHtml(ctx);
+        foreach (var heading in new[] { "Resource inventory and coverage", "Backup locations and storage",
+            "Current backup costs", "Recommended policies by resource and environment", "Documented recovery requirements",
+            "Cost optimisation opportunities", "Recovery and assessment limitations" })
         {
-            foreach (var heading in new[] { "Resource inventory and coverage", "Backup locations and storage",
-                "Current backup costs", "Recommended policies by resource and environment", "Documented recovery requirements",
-                "Cost optimisation opportunities", "Recovery and assessment limitations" })
-                Assert.Contains(heading, html);
-            Assert.Contains("Service team", html);
-            Assert.Contains("2h restore (ticket 123)", html);
-            Assert.Contains("Private endpoint and keys required", html);
-            Assert.Contains("illustrative, not live Azure data", html);
-            Assert.Contains("GBP", html);
-            Assert.Contains("native, cross-scope and third-party", html);
+            Assert.Contains(heading, html);
         }
+        Assert.Contains("Service team", html);
+        Assert.Contains("2h restore (ticket 123)", html);
+        Assert.Contains("Private endpoint and keys required", html);
+        Assert.Contains("illustrative, not live Azure data", html);
+        Assert.Contains("GBP", html);
+        Assert.Contains("native, cross-scope and third-party", html);
         Assert.All(scan.ResourceInventory, r => Assert.Equal(DemoDataService.SubProd, r.SubscriptionId));
         Assert.Single(scan.InventorySubscriptionIds);
-        foreach (var bytes in new[] { BackupReportService.SummaryDocx(ctx), BackupReportService.FindingsDocx(ctx) })
-        {
-            using var zip = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read);
-            using var reader = new StreamReader(zip.GetEntry("word/document.xml")!.Open());
-            var xml = reader.ReadToEnd();
-            Assert.Contains("Current backup costs", xml);
-            Assert.Contains("Documented recovery requirements", xml);
-            Assert.Contains("2h restore (ticket 123)", xml);
-        }
+        using var zip = new ZipArchive(new MemoryStream(BackupReportService.FindingsDocx(ctx)), ZipArchiveMode.Read);
+        using var reader = new StreamReader(zip.GetEntry("word/document.xml")!.Open());
+        var xml = reader.ReadToEnd();
+        Assert.Contains("Current backup costs", xml);
+        Assert.Contains("Documented recovery requirements", xml);
+        Assert.Contains("2h restore (ticket 123)", xml);
     }
 
     [Fact]

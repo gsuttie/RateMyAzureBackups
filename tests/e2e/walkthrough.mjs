@@ -75,8 +75,8 @@ await shot('rsv-grades-expanded');
 // Report modal
 await page.getByRole('button', { name: /Summary report/ }).first().click();
 await expectText('Backup Summary Report');
-await page.getByRole('button', { name: 'Detailed findings' }).click();
-await expectText('Detailed Backup Findings');
+await page.getByRole('button', { name: 'Extensive' }).click();
+await expectText('Extensive Backup Findings');
 await shot('rsv-report');
 await page.locator('.modal-head .icon-btn').click();
 

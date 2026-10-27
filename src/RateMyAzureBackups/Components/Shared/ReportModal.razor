@@ -1,11 +1,12 @@
 @inject BackupFlowService Flows
 @inject IJSRuntime JS
 
-<Modal Visible="_visible" Title="@(_findings ? "Detailed findings report" : "Summary report")" Wide="true" OnClose="Close">
+<Modal Visible="_visible" Title="@($"{_reportType} report")" Wide="true" OnClose="Close">
     <ChildContent>
         <div class="report-tabs">
-            <button class="tab @(_findings ? "" : "active")" @onclick="() => Switch(false)">Summary</button>
-            <button class="tab @(_findings ? "active" : "")" @onclick="() => Switch(true)">Detailed findings</button>
+            <button class="tab @(_reportType == BackupReportType.Summary ? "active" : "")" @onclick="() => Switch(BackupReportType.Summary)">Summary</button>
+            <button class="tab @(_reportType == BackupReportType.Detailed ? "active" : "")" @onclick="() => Switch(BackupReportType.Detailed)">Detailed</button>
+            <button class="tab @(_reportType == BackupReportType.Extensive ? "active" : "")" @onclick="() => Switch(BackupReportType.Extensive)">Extensive</button>
         </div>
         <div class="report-preview">@((MarkupString)_html)</div>
     </ChildContent>
@@ -27,33 +28,37 @@
     [Parameter] public BackupFlowKind Flow { get; set; }
 
     private bool _visible;
-    private bool _findings;
+    private BackupReportType _reportType = BackupReportType.Summary;
     private bool _downloading;
     private bool _copied;
     private string _html = "";
 
-    public void Open(bool findings)
+    public void Open(BackupReportType reportType)
     {
-        _findings = findings;
+        _reportType = reportType;
         _copied = false;
         Render();
         _visible = true;
         StateHasChanged();
     }
 
-    private void Switch(bool findings) { _findings = findings; _copied = false; Render(); }
+    public void Open(bool findings) => Open(findings ? BackupReportType.Extensive : BackupReportType.Summary);
 
-    private async Task CopyMarkdownAsync()
-    {
-        var ctx = Flows.ReportContext(Flow);
-        var markdown = _findings ? BackupReportService.FindingsMarkdown(ctx) : BackupReportService.SummaryMarkdown(ctx);
-        _copied = await JS.InvokeAsync<bool>("rmab.copy", markdown);
-    }
+    private void Switch(BackupReportType reportType) { _reportType = reportType; _copied = false; Render(); }
+
+    private async Task CopyMarkdownAsync() =>
+        _copied = await JS.InvokeAsync<bool>("rmab.copy", Markdown(Flows.ReportContext(Flow)));
 
     private void Render()
     {
         var ctx = Flows.ReportContext(Flow);
-        _html = _findings ? BackupReportService.FindingsHtml(ctx) : BackupReportService.SummaryHtml(ctx);
+        _html = _reportType switch
+        {
+            BackupReportType.Summary => BackupReportService.SummaryHtml(ctx),
+            BackupReportType.Detailed => BackupReportService.DetailedHtml(ctx),
+            BackupReportType.Extensive => BackupReportService.ExtensiveHtml(ctx),
+            _ => throw new ArgumentOutOfRangeException(nameof(_reportType), _reportType, "Unsupported report type.")
+        };
     }
 
     private void Close() => _visible = false;
@@ -64,8 +69,14 @@
         try
         {
             var ctx = Flows.ReportContext(Flow);
-            var bytes = _findings ? BackupReportService.FindingsDocx(ctx) : BackupReportService.SummaryDocx(ctx);
-            await JS.InvokeVoidAsync("rmab.download", BackupReportService.FileName(ctx, _findings), Convert.ToBase64String(bytes),
+            var bytes = _reportType switch
+            {
+                BackupReportType.Summary => BackupReportService.SummaryDocx(ctx),
+                BackupReportType.Detailed => BackupReportService.DetailedDocx(ctx),
+                BackupReportType.Extensive => BackupReportService.ExtensiveDocx(ctx),
+                _ => throw new ArgumentOutOfRangeException(nameof(_reportType), _reportType, "Unsupported report type.")
+            };
+            await JS.InvokeVoidAsync("rmab.download", BackupReportService.FileName(ctx, _reportType), Convert.ToBase64String(bytes),
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
         }
         finally
@@ -73,4 +84,12 @@
             _downloading = false;
         }
     }
+
+    private string Markdown(BackupReportContext ctx) => _reportType switch
+    {
+        BackupReportType.Summary => BackupReportService.SummaryMarkdown(ctx),
+        BackupReportType.Detailed => BackupReportService.DetailedMarkdown(ctx),
+        BackupReportType.Extensive => BackupReportService.ExtensiveMarkdown(ctx),
+        _ => throw new ArgumentOutOfRangeException(nameof(_reportType), _reportType, "Unsupported report type.")
+    };
 }
