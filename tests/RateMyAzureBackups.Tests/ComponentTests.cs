@@ -203,8 +203,9 @@ public class ComponentTests : BunitContext
     }
 
     [Fact]
-    public async Task ReportModal_DownloadsWordAndMarkdownForBothFlowsAndTabs()
+    public async Task ReportModal_DownloadsWordAndCopiesMarkdownForBothFlowsAndTabs()
     {
+        JSInterop.Setup<bool>("rmab.copy", _ => true).SetResult(true);
         foreach (var flow in new[] { BackupFlowKind.RecoveryServices, BackupFlowKind.BackupVault })
         {
             await ScanAsync(flow);
@@ -215,31 +216,25 @@ public class ComponentTests : BunitContext
                 if (findings) cut.FindAll(".report-tabs button")[1].Click();
                 var buttons = cut.FindAll(".report-downloads button");
                 Assert.Equal(2, buttons.Count);
-                Assert.Contains("Download .docx", buttons[0].TextContent);
-                Assert.Contains("Download .md", buttons[1].TextContent);
-                Assert.Contains("btn-primary", buttons[0].ClassList);
-                Assert.Contains("btn-success", buttons[1].ClassList);
-                foreach (var markdown in new[] { false, true })
-                {
-                    await buttons[markdown ? 1 : 0].ClickAsync(new());
-                    var call = JSInterop.Invocations.Last(i => i.Identifier == "rmab.download");
-                    var ctx = Flows.ReportContext(flow);
-                    Assert.Equal(BackupReportService.FileName(ctx, findings, markdown), call.Arguments[0]);
-                    var bytes = Convert.FromBase64String(Assert.IsType<string>(call.Arguments[1]));
-                    if (markdown)
-                    {
-                        Assert.Equal("text/markdown;charset=utf-8", call.Arguments[2]);
-                        Assert.Equal(findings ? BackupReportService.FindingsMarkdown(ctx) : BackupReportService.SummaryMarkdown(ctx),
-                            System.Text.Encoding.UTF8.GetString(bytes));
-                    }
-                    else
-                    {
-                        Assert.Equal("application/vnd.openxmlformats-officedocument.wordprocessingml.document", call.Arguments[2]);
-                        Assert.Equal((byte)'P', bytes[0]);
-                        Assert.Equal((byte)'K', bytes[1]);
-                    }
-                    Assert.All(cut.FindAll(".report-downloads button"), button => Assert.False(button.HasAttribute("disabled")));
-                }
+                Assert.Contains("Copy Markdown", buttons[0].TextContent);
+                Assert.Contains("Download .docx", buttons[1].TextContent);
+                Assert.Contains("btn-ghost", buttons[0].ClassList);
+                Assert.Contains("btn-primary", buttons[1].ClassList);
+                var ctx = Flows.ReportContext(flow);
+
+                await buttons[0].ClickAsync(new());
+                var copy = JSInterop.Invocations.Last(i => i.Identifier == "rmab.copy");
+                Assert.Equal(findings ? BackupReportService.FindingsMarkdown(ctx) : BackupReportService.SummaryMarkdown(ctx), copy.Arguments[0]);
+                Assert.Contains("Copied", cut.FindAll(".report-downloads button")[0].TextContent);
+
+                await cut.FindAll(".report-downloads button")[1].ClickAsync(new());
+                var call = JSInterop.Invocations.Last(i => i.Identifier == "rmab.download");
+                Assert.Equal(BackupReportService.FileName(ctx, findings), call.Arguments[0]);
+                var bytes = Convert.FromBase64String(Assert.IsType<string>(call.Arguments[1]));
+                Assert.Equal("application/vnd.openxmlformats-officedocument.wordprocessingml.document", call.Arguments[2]);
+                Assert.Equal((byte)'P', bytes[0]);
+                Assert.Equal((byte)'K', bytes[1]);
+                Assert.All(cut.FindAll(".report-downloads button"), button => Assert.False(button.HasAttribute("disabled")));
             }
         }
     }
