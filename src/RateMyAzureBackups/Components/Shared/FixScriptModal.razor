@@ -48,6 +48,7 @@
 
     private async Task CopyAsync()
     {
-        _copied = await JS.InvokeAsync<bool>("rmab.copy", Script);
+        try { _copied = await JS.InvokeAsync<bool>("rmab.copy", Script); }
+        catch (JSException) { _copied = false; }
     }
 }

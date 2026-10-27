@@ -47,7 +47,8 @@
     {
         var ctx = Flows.ReportContext(Flow);
         var markdown = _findings ? BackupReportService.FindingsMarkdown(ctx) : BackupReportService.SummaryMarkdown(ctx);
-        _copied = await JS.InvokeAsync<bool>("rmab.copy", markdown);
+        try { _copied = await JS.InvokeAsync<bool>("rmab.copy", markdown); }
+        catch (JSException) { _copied = false; }
     }
 
     private void Render()
